@@ -19,8 +19,8 @@ services:
     restart: unless-stopped
     environment:
       # Usar los nombres que espera tu bot.js
-      - PACKET_EMAIL=${EMAIL} # <-- Mapea la variable del entorno de Portainer al nombre que espera el bot
-      - PACKET_PASSWORD=${PASSWORD} # <-- Mapea la variable del entorno de Portainer al nombre que espera el bot
+      - EMAIL=${EMAIL} # <-- Mapea la variable del entorno de Portainer al nombre que espera el bot
+      - PASSWORD=${PASSWORD} # <-- Mapea la variable del entorno de Portainer al nombre que espera el bot
       - TZ=${TZ:-UTC} # <-- Opcional: Zona horaria
     # Opcional: Configurar DNS
     dns:
