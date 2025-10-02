@@ -13,12 +13,11 @@ function getCurrentTime() {
 }
 
 (async () => {
-  const email = process.env.PACKET_EMAIL;
-  const password = process.env.PACKET_PASSWORD;
+  const email = process.env.EMAIL;
+  const password = process.env.PASSWORD;
 
   if (!email || !password) {
-    console.error("❌ Variables de entorno PACKET_EMAIL y PACKET_PASSWORD requer
-idas.");
+    console.error("❌ Variables de entorno EMAIL y PASSWORD requeridas.");
     process.exit(1);
   }
 
@@ -37,8 +36,7 @@ idas.");
       };
     }
     // Si no coincide el formato, asumir 0 segundos para evitar errores
-    console.warn(`⚠️ No se pudo parsear el texto del temporizador: "${countdownTe
-xt}". Usando 0 segundos.`);
+    console.warn(`⚠️ No se pudo parsear el texto del temporizador: "${countdownText}". Usando 0 segundos.`);
     return { hours: 0, minutes: 0, seconds: 0 };
   }
 
@@ -349,12 +347,11 @@ function getCurrentTime() {
 }
 
 (async () => {
-  const email = process.env.PACKET_EMAIL;
-  const password = process.env.PACKET_PASSWORD;
+  const email = process.env.EMAIL;
+  const password = process.env.PASSWORD;
 
   if (!email || !password) {
-    console.error("❌ Variables de entorno PACKET_EMAIL y PACKET_PASSWORD requer
-idas.");
+    console.error("❌ Variables de entorno EMAIL y PASSWORD requeridas.");
     process.exit(1);
   }
 
