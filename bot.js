@@ -21,6 +21,7 @@ function getCurrentDateTime() {
 }
 
 (async () => {
+  // Ajustar nombres de variables de entorno a EMAIL y PASSWORD como me indicaste
   const email = process.env.EMAIL;
   const password = process.env.PASSWORD;
 
@@ -150,6 +151,7 @@ function getCurrentDateTime() {
 
       // Primer clic: Hacer clic en el elemento del premio
       console.log("👆 Haciendo primer clic en el elemento del premio...");
+      // Usar el selector correcto que proporcionaste
       const selectorGift = "#__nuxt > div.ucenter-header > div.header > div > div.flow-box > img";
       
       try {
