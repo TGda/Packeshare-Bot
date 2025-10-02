@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  packetshare:
+    container_name: Packetshare
+    image: packetshare/packetshare
+    restart: always
+    command: -accept-tos -email=${EMAIL} -password=${PASSWORD}
+    # Opcional: Configurar DNS
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    # Opcional: Usar un nombre de contenedor más único si no usas container_name
+    # hostname: packetshare-core
+
+  packetshare-bot:
+    container_name: Packetshare-bot
+    build: . # <-- Indica que debe construir la imagen desde el Dockerfile en ESTE directorio (donde está el docker-compose.yml)
+    restart: unless-stopped
+    environment:
+      # Usar los nombres que espera tu bot.js
+      - PACKET_EMAIL=${EMAIL} # <-- Mapea la variable del entorno de Portainer al nombre que espera el bot
+      - PACKET_PASSWORD=${PASSWORD} # <-- Mapea la variable del entorno de Portainer al nombre que espera el bot
+      - TZ=${TZ:-UTC} # <-- Opcional: Zona horaria
+    # Opcional: Configurar DNS
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    # Opcional: Si el bot depende de que el core esté listo (aunque no es común para este tipo de tareas)
+    # depends_on:
+    #   - packetshare
