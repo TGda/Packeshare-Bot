@@ -25,7 +25,7 @@ function getCurrentDateTime() {
   const password = process.env.PASSWORD;
 
   if (!email || !password) {
-    console.error("❌ Variables de entorno PACKET_EMAIL y PACKET_PASSWORD requeridas.");
+    console.error("❌ Variables de entorno EMAIL y PASSWORD requeridas.");
     process.exit(1);
   }
 
