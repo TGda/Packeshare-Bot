@@ -22,7 +22,7 @@ function getCurrentTimestamp() {
   const password = process.env.PASSWORD;
 
   if (!email || !password) {
-    console.error("❌ Variables de entorno EMAIL y PASSWORD requeridas.");
+    console.error(`${getCurrentTimestamp()} ❌ Variables de entorno EMAIL y PASSWORD requeridas.`);
     process.exit(1);
   }
 
@@ -77,7 +77,7 @@ function getCurrentTimestamp() {
   async function runCycle() {
     try {
       if (isFirstRun) {
-        console.log("${getCurrentTimestamp()} 🚀 Iniciando bot de PacketShare...");
+        console.log(`${getCurrentTimestamp()} 🚀 Iniciando bot de PacketShare...`);
         browser = await puppeteer.launch({
           headless: "new", // Asegúrate de usar el modo que funcione mejor para ti
           args: [
@@ -90,7 +90,7 @@ function getCurrentTimestamp() {
 
         page = await browser.newPage();
         
-        console.log("${getCurrentTimestamp()} 🌐 Abriendo página de login...");
+        console.log(`${getCurrentTimestamp()} 🌐 Abriendo página de login...`);
         const response = await page.goto("https://www.packetshare.io/login/", {
           waitUntil: "networkidle2",
           timeout: 30000,
@@ -98,7 +98,7 @@ function getCurrentTimestamp() {
         console.log(`   Estado de carga: ${response.status()}`);
 
         // Esperar a que los campos de entrada estén disponibles
-        console.log("${getCurrentTimestamp()} 🔍 Esperando campos de login...");
+        console.log(`${getCurrentTimestamp()} 🔍 Esperando campos de login...`);
         await page.waitForSelector('input[placeholder="Please enter the email"]', {
           timeout: 10000,
         });
@@ -107,7 +107,7 @@ function getCurrentTimestamp() {
         });
         await page.waitForSelector("div.btn.login", { timeout: 10000 });
 
-        console.log("${getCurrentTimestamp()} ✍️ Escribiendo credenciales...");
+        console.log(`${getCurrentTimestamp()} ✍️ Escribiendo credenciales...`);
         await page.type('input[placeholder="Please enter the email"]', email, {
           delay: 50,
         });
@@ -115,11 +115,11 @@ function getCurrentTimestamp() {
           delay: 50,
         });
 
-        console.log("${getCurrentTimestamp()} 🔑 Enviando login...");
+        console.log(`${getCurrentTimestamp()} 🔑 Enviando login...`);
         await page.click("div.btn.login");
 
         // Esperar un poco después del clic o la posible redirección
-        console.log("${getCurrentTimestamp()} ⏳ Esperando respuesta...");
+        console.log(`${getCurrentTimestamp()} ⏳ Esperando respuesta...`);
         await page.waitForTimeout(5000);
 
         const currentUrl = page.url();
@@ -129,24 +129,24 @@ function getCurrentTimestamp() {
           throw new Error("No se pudo acceder al dashboard después del login");
         }
 
-        console.log("${getCurrentTimestamp()} ✅ Login exitoso. Redirigido a dashboard.");
+        console.log(`${getCurrentTimestamp()} ✅ Login exitoso. Redirigido a dashboard.");
         isFirstRun = false;
       } else {
         // En ciclos posteriores, solo refrescamos la página
-        console.log("${getCurrentTimestamp()} 🔄 Refrescando dashboard...");
+        console.log(`${getCurrentTimestamp()} 🔄 Refrescando dashboard...`);
         await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
         await page.waitForTimeout(3000); // Esperar un poco después de refrescar
       }
 
       // Obtener balance actual con hora
-      console.log("${getCurrentTimestamp()} 🔍 Obteniendo balance actual...");
+      console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance actual...`);
       await page.waitForSelector('div.money span', { timeout: 15000 });
       const balance = await page.$eval('div.money span', el => el.textContent);
       const { dateStr: currentDateTimeDate, timeStr: currentDateTimeTime } = getCurrentDateTime();
       console.log(`💰 Balance actual el ${currentDateTimeDate} a las ${currentDateTimeTime} : ${balance}`);
 
       // Primer clic: Hacer clic en el elemento del premio
-      console.log("${getCurrentTimestamp()} 👆 Haciendo primer clic en el elemento del premio...");
+      console.log(`${getCurrentTimestamp()} 👆 Haciendo primer clic en el elemento del premio...`);
       // Usar el selector correcto que proporcionaste
       const selectorGift = "#__nuxt > div.ucenter-header > div.header > div > div.flow-box > img";
       
@@ -158,11 +158,11 @@ function getCurrentTimestamp() {
       }
 
       // Esperar un momento para que se abra el popup
-      console.log("${getCurrentTimestamp()} ⏳ Esperando apertura del popup...");
+      console.log(`${getCurrentTimestamp()} ⏳ Esperando apertura del popup...`);
       await page.waitForTimeout(3000);
 
       // Verificar si aparece el botón de confirmación o el conteo regresivo
-      console.log("${getCurrentTimestamp()} 🔍 Verificando contenido del popup...");
+      console.log(`${getCurrentTimestamp()} 🔍 Verificando contenido del popup...`);
 
       // Intentar encontrar el botón de confirmación
       const confirmButtonSelector = "body > div.dialog-flow-box > div > div.button";
@@ -170,21 +170,21 @@ function getCurrentTimestamp() {
       
       try {
         await page.waitForSelector(confirmButtonSelector, { timeout: 5000 });
-        console.log("${getCurrentTimestamp()} ✅ Botón de confirmación encontrado. Haciendo segundo clic para reclamar el premio...");
+        console.log(`${getCurrentTimestamp()} ✅ Botón de confirmación encontrado. Haciendo segundo clic para reclamar el premio...`);
         await page.click(confirmButtonSelector);
         prizeClaimed = true;
         
         // Esperar un momento después de reclamar el premio
-        console.log("${getCurrentTimestamp()} ⏳ Esperando después de reclamar el premio...");
+        console.log(`${getCurrentTimestamp()} ⏳ Esperando después de reclamar el premio...`);
         await page.waitForTimeout(5000);
         
         // Refrescar la página para obtener el balance actualizado
-        console.log("${getCurrentTimestamp()} 🔄 Refrescando página para obtener balance actualizado...");
+        console.log(`${getCurrentTimestamp()} 🔄 Refrescando página para obtener balance actualizado...`);
         await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
         await page.waitForTimeout(3000);
         
         // Verificar si el balance cambió
-        console.log("${getCurrentTimestamp()} 🔍 Verificando si el balance cambió...");
+        console.log(`${getCurrentTimestamp()} 🔍 Verificando si el balance cambió...`);
         await page.waitForSelector('div.money span', { timeout: 15000 });
         const newBalance = await page.$eval('div.money span', el => el.textContent);
         
@@ -196,10 +196,10 @@ function getCurrentTimestamp() {
         }
         
         // Ahora verificar el nuevo conteo regresivo
-        console.log("${getCurrentTimestamp()} 🔍 Verificando nuevo conteo regresivo...");
+        console.log(`${getCurrentTimestamp()} 🔍 Verificando nuevo conteo regresivo...`);
         try {
           // Hacer clic nuevamente en el elemento del premio para ver el nuevo conteo
-          console.log("${getCurrentTimestamp()} 👆 Haciendo clic para verificar nuevo conteo regresivo...");
+          console.log(`${getCurrentTimestamp()} 👆 Haciendo clic para verificar nuevo conteo regresivo...`);
           await page.waitForSelector(selectorGift, { timeout: 10000 });
           await page.click(selectorGift);
           
@@ -225,22 +225,22 @@ function getCurrentTimestamp() {
             const closeButtonSelector = "body > div.dialog-flow-box > div > img.close-button";
             await page.waitForSelector(closeButtonSelector, { timeout: 3000 });
             await page.click(closeButtonSelector);
-            console.log("${getCurrentTimestamp()} ❌ Ventana emergente cerrada automáticamente.");
+            console.log(`${getCurrentTimestamp()} ❌ Ventana emergente cerrada automáticamente.");
           } catch (e) {
-            console.log("${getCurrentTimestamp()} ℹ️ No se encontró ventana emergente para cerrar (esto es normal).");
+            console.log(`${getCurrentTimestamp()} ℹ️ No se encontró ventana emergente para cerrar (esto es normal).");
           }
           
           // Esperar el tiempo calculado antes de repetir
           setTimeout(runCycle, waitTimeMs);
           
         } catch (countdownError) {
-          console.log("${getCurrentTimestamp()} ⚠️ No se pudo obtener el nuevo conteo regresivo. Reintentando en 5 minutos...");
+          console.log(`${getCurrentTimestamp()} ⚠️ No se pudo obtener el nuevo conteo regresivo. Reintentando en 5 minutos...`);
           setTimeout(runCycle, 300000); // 5 minutos
         }
         
       } catch (confirmButtonError) {
         // Si no se encuentra el botón de confirmación, verificar si hay conteo regresivo
-        console.log("${getCurrentTimestamp()} ℹ️ No se encontró botón de confirmación. Verificando si hay conteo regresivo...");
+        console.log(`${getCurrentTimestamp()} ℹ️ No se encontró botón de confirmación. Verificando si hay conteo regresivo...`);
         
         try {
           await page.waitForSelector('div.time', { timeout: 5000 });
@@ -261,34 +261,34 @@ function getCurrentTimestamp() {
             const closeButtonSelector = "body > div.dialog-flow-box > div > img.close-button";
             await page.waitForSelector(closeButtonSelector, { timeout: 3000 });
             await page.click(closeButtonSelector);
-            console.log("${getCurrentTimestamp()} ❌ Ventana emergente cerrada automáticamente.");
+            console.log(`${getCurrentTimestamp()} ❌ Ventana emergente cerrada automáticamente.");
           } catch (e) {
-            console.log("${getCurrentTimestamp()} ℹ️ No se encontró ventana emergente para cerrar (esto es normal).");
+            console.log(`${getCurrentTimestamp()} ℹ️ No se encontró ventana emergente para cerrar (esto es normal).");
           }
           
           // Esperar el tiempo calculado antes de repetir
           setTimeout(runCycle, waitTimeMs);
           
         } catch (countdownError) {
-          console.log("${getCurrentTimestamp()} ⚠️ No se encontró ni botón de confirmación ni conteo regresivo. Reintentando en 5 minutos...");
+          console.log(`${getCurrentTimestamp()} ⚠️ No se encontró ni botón de confirmación ni conteo regresivo. Reintentando en 5 minutos...`);
           setTimeout(runCycle, 300000); // 5 minutos
         }
       }
 
     } catch (err) {
-      console.error("⚠️ Error en el ciclo:", err.message);
+      console.error(`${getCurrentTimestamp()} ⚠️ Error en el ciclo:`, err.message);
       
       // Intentar reconectar en caso de error
       if (browser) {
         try {
           await browser.close();
         } catch (closeErr) {
-          console.error("⚠️ Error al cerrar el navegador:", closeErr.message);
+          console.error(`${getCurrentTimestamp()} ⚠️ Error al cerrar el navegador:`, closeErr.message);
         }
       }
       
       // Reiniciar después de 60 segundos
-      console.log("${getCurrentTimestamp()} 🔄 Intentando reconectar en 60 segundos...");
+      console.log(`${getCurrentTimestamp()} 🔄 Intentando reconectar en 60 segundos...`);
       setTimeout(() => {
         isFirstRun = true; // Forzar relogin
         runCycle();
@@ -301,7 +301,7 @@ function getCurrentTimestamp() {
 
   // Manejar señales de cierre limpiamente
   process.on('SIGINT', async () => {
-    console.log("${getCurrentTimestamp()} \n🛑 Recibida señal de interrupción. Cerrando...");
+    console.log(`${getCurrentTimestamp()} \n🛑 Recibida señal de interrupción. Cerrando...`);
     if (browser) {
       await browser.close();
     }
@@ -309,7 +309,7 @@ function getCurrentTimestamp() {
   });
 
   process.on('SIGTERM', async () => {
-    console.log("${getCurrentTimestamp()} \n🛑 Recibida señal de terminación. Cerrando...");
+    console.log(`${getCurrentTimestamp()} \n🛑 Recibida señal de terminación. Cerrando...`);
     if (browser) {
       await browser.close();
     }
