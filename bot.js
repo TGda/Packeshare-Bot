@@ -1,5 +1,6 @@
 // bot.js
 const puppeteer = require("puppeteer");
+const http = require("http"); // Para enviar notificaciones HTTP/HTTPS
 
 // Función para obtener la fecha y hora actual formateada [DDMMMYY HH:MM:SS]
 function getCurrentTimestamp() {
@@ -58,6 +59,64 @@ function getFutureDateTime(milliseconds) {
     second: '2-digit'
   });
   return { dateStr, timeStr };
+}
+
+// Función para enviar una notificación POST condicional
+async function sendNotification(message) { // 'message' se mantiene por si se desea en el futuro
+    const notificationUrl = process.env.NOTIFICATION;
+    
+    // Solo enviar si la variable NOTIFICATION está definida y no está vacía
+    if (!notificationUrl) {
+        console.log(`${getCurrentTimestamp()} ℹ️ Variable NOTIFICATION no definida. Omitiendo notificación.`);
+        return;
+    }
+
+    console.log(`${getCurrentTimestamp()} 📢 Enviando notificación a: ${notificationUrl}`);
+    
+    return new Promise((resolve) => {
+        const postData = ''; // Sin datos en el cuerpo del POST
+        
+        // Usar 'new URL()' para parsear correctamente el protocolo (http o https), hostname, puerto y path
+        let url;
+        try {
+           url = new URL(notificationUrl);
+        } catch (err) {
+            console.error(`${getCurrentTimestamp()} ⚠️ Error al parsear la URL de notificación '${notificationUrl}': ${err.message}. Omitiendo notificación.`);
+            resolve(); // Resolver para no romper el flujo principal
+            return;
+        }
+        
+        // Determinar si usar 'http' o 'https' basado en el protocolo de la URL
+        const isHttps = url.protocol === 'https:';
+        const httpModule = isHttps ? require('https') : require('http');
+
+        const options = {
+            hostname: url.hostname,
+            port: url.port || (isHttps ? 443 : 80), // Puerto por defecto si no se especifica
+            path: url.pathname + url.search, // Incluye ruta y parámetros de consulta
+            method: 'POST',
+            headers: {
+                // 'Content-Type': 'application/json', // Opcional: Puedes eliminarlo si no es requerido por el endpoint
+                'Content-Length': Buffer.byteLength(postData)
+            }
+        };
+
+        // Crear la solicitud usando el módulo apropiado (http o https)
+        const req = httpModule.request(options, (res) => {
+            console.log(`${getCurrentTimestamp()} ✅ Notificación enviada. Código de estado: ${res.statusCode}`);
+            resolve(); // Resolvemos la promesa independientemente del código de estado
+        });
+
+        req.on('error', (e) => {
+            console.error(`${getCurrentTimestamp()} ⚠️ Error al enviar notificación a '${notificationUrl}': ${e.message}`);
+            // No resolvemos con error para no romper el flujo principal
+            resolve(); 
+        });
+
+        // Escribir datos al cuerpo de la solicitud (vacío en este caso)
+        req.write(postData);
+        req.end();
+    });
 }
 
 let browser;
@@ -130,11 +189,11 @@ async function runCycle() {
       await page.waitForTimeout(3000); // Esperar un poco más después de refrescar
     }
 
-    // Obtener balance actual con hora
-    console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance actual...`);
+    // --- LÓGICA MEJORADA: Verificar balance antes de reclamar ---
+    console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance ANTES de intentar reclamar...`);
     await page.waitForSelector('div.money span', { timeout: 15000 });
-    const balance = await page.$eval('div.money span', el => el.textContent);
-    console.log(`${getCurrentTimestamp()} 💰 Balance actual: ${balance}`);
+    const balanceBefore = await page.$eval('div.money span', el => el.textContent);
+    console.log(`${getCurrentTimestamp()} 💰 Balance antes: ${balanceBefore}`);
 
     // Primer clic: Hacer clic en el elemento del premio
     console.log(`${getCurrentTimestamp()} 👆 Haciendo primer clic en el elemento del premio...`);
@@ -156,85 +215,26 @@ async function runCycle() {
 
     // Intentar encontrar el botón de confirmación
     const confirmButtonSelector = "body > div.dialog-flow-box > div > div.button";
-    let prizeClaimed = false;
+    let prizeClaimAttempted = false;
     
     try {
       await page.waitForSelector(confirmButtonSelector, { timeout: 5000 });
       console.log(`${getCurrentTimestamp()} ✅ Botón de confirmación encontrado. Haciendo segundo clic para reclamar el premio...`);
       await page.click(confirmButtonSelector);
-      prizeClaimed = true;
+      prizeClaimAttempted = true;
       
       // Esperar un momento después de reclamar el premio
       console.log(`${getCurrentTimestamp()} ⏳ Esperando después de reclamar el premio...`);
       await page.waitForTimeout(5000);
       
-      // Refrescar la página para obtener el balance actualizado
-      console.log(`${getCurrentTimestamp()} 🔄 Refrescando página para obtener balance actualizado...`);
-      await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
-      await page.waitForTimeout(3000);
-      
-      // Verificar si el balance cambió
-      console.log(`${getCurrentTimestamp()} 🔍 Verificando si el balance cambió...`);
-      await page.waitForSelector('div.money span', { timeout: 15000 });
-      const newBalance = await page.$eval('div.money span', el => el.textContent);
-      
-      if (newBalance !== balance) {
-        console.log(`${getCurrentTimestamp()} 🎉 Balance incrementado: ${balance} → ${newBalance}`);
-      } else {
-        console.log(`${getCurrentTimestamp()} ℹ️ Balance sin cambios: ${balance} → ${newBalance}`);
-      }
-      
-      // Ahora verificar el nuevo conteo regresivo
-      console.log(`${getCurrentTimestamp()} 🔍 Verificando nuevo conteo regresivo...`);
-      try {
-        // Hacer clic nuevamente en el elemento del premio para ver el nuevo conteo
-        console.log(`${getCurrentTimestamp()} 👆 Haciendo clic para verificar nuevo conteo regresivo...`);
-        await page.waitForSelector(selectorGift, { timeout: 10000 });
-        await page.click(selectorGift);
-        
-        // Esperar un momento para que se abra el popup
-        await page.waitForTimeout(3000);
-        
-        // Verificar si aparece el conteo regresivo
-        await page.waitForSelector('div.time', { timeout: 5000 });
-        const countdownText = await page.$eval('div.time', el => el.textContent);
-        console.log(`${getCurrentTimestamp()} ⏱️ Nuevo conteo regresivo encontrado: ${countdownText.trim()}`);
-        
-        // Parsear el tiempo y calcular espera
-        const timeObj = parseCountdownText(countdownText.trim());
-        const waitTimeMs = timeToMilliseconds(timeObj) + 20000; // +20 segundos
-        
-        // Programar el próximo ciclo
-        const { dateStr: futureDateTimeDate, timeStr: futureDateTimeTime } = getFutureDateTime(waitTimeMs);
-        const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
-        console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${futureDateTimeDate} a las ${futureDateTimeTime} que son aproximadamente en ${minutes} minutos...`);
-        
-        // Cerrar la posible ventana emergente si existe
-        try {
-          const closeButtonSelector = "body > div.dialog-flow-box > div > img.close-button";
-          await page.waitForSelector(closeButtonSelector, { timeout: 3000 });
-          await page.click(closeButtonSelector);
-          console.log(`${getCurrentTimestamp()} ❌ Ventana emergente cerrada automáticamente.`);
-        } catch (e) {
-          console.log(`${getCurrentTimestamp()} ℹ️ No se encontró ventana emergente para cerrar (esto es normal).`);
-        }
-        
-        // Esperar el tiempo calculado antes de repetir
-        setTimeout(runCycle, waitTimeMs);
-        
-      } catch (countdownError) {
-        console.log(`${getCurrentTimestamp()} ⚠️ No se pudo obtener el nuevo conteo regresivo. Reintentando en 5 minutos...`);
-        setTimeout(runCycle, 300000); // 5 minutos
-      }
-      
     } catch (confirmButtonError) {
-      // Si no se encuentra el botón de confirmación, verificar si hay conteo regresivo
+      // Si no se encuentra el botón de confirmación, podría ser que ya esté en conteo regresivo
       console.log(`${getCurrentTimestamp()} ℹ️ No se encontró botón de confirmación. Verificando si hay conteo regresivo...`);
       
       try {
         await page.waitForSelector('div.time', { timeout: 5000 });
         const countdownText = await page.$eval('div.time', el => el.textContent);
-        console.log(`${getCurrentTimestamp()} ⏳ Conteo regresivo encontrado: ${countdownText.trim()}`);
+        console.log(`${getCurrentTimestamp()} ⏳ Conteo regresivo encontrado (sin necesidad de confirmar): ${countdownText.trim()}`);
         
         // Parsear el tiempo y calcular espera
         const timeObj = parseCountdownText(countdownText.trim());
@@ -257,11 +257,80 @@ async function runCycle() {
         
         // Esperar el tiempo calculado antes de repetir
         setTimeout(runCycle, waitTimeMs);
+        return; // Salir de la función
         
       } catch (countdownError) {
         console.log(`${getCurrentTimestamp()} ⚠️ No se encontró ni botón de confirmación ni conteo regresivo. Reintentando en 5 minutos...`);
         setTimeout(runCycle, 300000); // 5 minutos
+        return; // Salir de la función
       }
+    }
+
+    // --- LÓGICA MEJORADA: Verificar balance DESPUÉS de reclamar ---
+    if (prizeClaimAttempted) {
+        // Refrescar la página para obtener el balance actualizado
+        console.log(`${getCurrentTimestamp()} 🔄 Refrescando página para obtener balance DESPUÉS de reclamar...`);
+        await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
+        await page.waitForTimeout(3000);
+        
+        console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance DESPUÉS de intentar reclamar...`);
+        await page.waitForSelector('div.money span', { timeout: 15000 });
+        const balanceAfter = await page.$eval('div.money span', el => el.textContent);
+        console.log(`${getCurrentTimestamp()} 💰 Balance después: ${balanceAfter}`);
+        
+        const balanceIncreased = parseFloat(balanceAfter.replace(/,/g, '')) > parseFloat(balanceBefore.replace(/,/g, ''));
+        
+        if (balanceIncreased) {
+            console.log(`${getCurrentTimestamp()} 🎉 Éxito: El balance aumentó. Premio reclamado.`);
+            // Enviar notificación de éxito
+            await sendNotification("Premio reclamado con aumento de balance");
+        } else {
+            console.log(`${getCurrentTimestamp()} ⚠️ Advertencia: El balance NO aumentó después de reclamar. Puede que el premio haya sido $0 o haya un retraso en la actualización.`);
+            // NO se envía notificación si el balance no aumenta
+        }
+    }
+
+    // Ahora verificar el nuevo conteo regresivo
+    console.log(`${getCurrentTimestamp()} 🔍 Verificando nuevo conteo regresivo...`);
+    try {
+      // Hacer clic nuevamente en el elemento del premio para ver el nuevo conteo
+      console.log(`${getCurrentTimestamp()} 👆 Haciendo clic para verificar nuevo conteo regresivo...`);
+      await page.waitForSelector(selectorGift, { timeout: 10000 });
+      await page.click(selectorGift);
+      
+      // Esperar un momento para que se abra el popup
+      await page.waitForTimeout(3000);
+      
+      // Verificar si aparece el conteo regresivo
+      await page.waitForSelector('div.time', { timeout: 5000 });
+      const countdownText = await page.$eval('div.time', el => el.textContent);
+      console.log(`${getCurrentTimestamp()} ⏱️ Nuevo conteo regresivo encontrado: ${countdownText.trim()}`);
+      
+      // Parsear el tiempo y calcular espera
+      const timeObj = parseCountdownText(countdownText.trim());
+      const waitTimeMs = timeToMilliseconds(timeObj) + 20000; // +20 segundos
+      
+      // Programar el próximo ciclo
+      const { dateStr: futureDateTimeDate, timeStr: futureDateTimeTime } = getFutureDateTime(waitTimeMs);
+      const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
+      console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${futureDateTimeDate} a las ${futureDateTimeTime} que son aproximadamente en ${minutes} minutos...`);
+      
+      // Cerrar la posible ventana emergente si existe
+      try {
+        const closeButtonSelector = "body > div.dialog-flow-box > div > img.close-button";
+        await page.waitForSelector(closeButtonSelector, { timeout: 3000 });
+        await page.click(closeButtonSelector);
+        console.log(`${getCurrentTimestamp()} ❌ Ventana emergente cerrada automáticamente.`);
+      } catch (e) {
+        console.log(`${getCurrentTimestamp()} ℹ️ No se encontró ventana emergente para cerrar (esto es normal).`);
+      }
+      
+      // Esperar el tiempo calculado antes de repetir
+      setTimeout(runCycle, waitTimeMs);
+      
+    } catch (countdownError) {
+      console.log(`${getCurrentTimestamp()} ⚠️ No se pudo obtener el nuevo conteo regresivo. Reintentando en 5 minutos...`);
+      setTimeout(runCycle, 300000); // 5 minutos
     }
 
   } catch (err) {
