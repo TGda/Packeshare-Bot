@@ -22,6 +22,7 @@ services:
       - EMAIL=${EMAIL} # <-- Mapea la variable del entorno de Portainer al nombre que espera el bot
       - PASSWORD=${PASSWORD} # <-- Mapea la variable del entorno de Portainer al nombre que espera el bot
       - TZ=${TZ:-UTC} # <-- Opcional: Zona horaria
+       - NOTIFICATION=${NOTIFICATION} # <-- Opcional para enviar un webhook de que se logro collectar
     # Opcional: Configurar DNS
     dns:
       - 1.1.1.1
