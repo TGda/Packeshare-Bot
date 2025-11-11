@@ -213,19 +213,26 @@ async function runCycle() {
     // Verificar si aparece el botón de confirmación o el conteo regresivo
     console.log(`${getCurrentTimestamp()} 🔍 Verificando contenido del popup...`);
 
-    // Intentar encontrar el botón de confirmación
-    const confirmButtonSelector = "body > div.dialog-flow-box > div > div.button";
+    // Intentar encontrar el botón de confirmación usando XPath
     let prizeClaimAttempted = false;
     
     try {
-      await page.waitForSelector(confirmButtonSelector, { timeout: 5000 });
-      console.log(`${getCurrentTimestamp()} ✅ Botón de confirmación encontrado. Haciendo segundo clic para reclamar el premio...`);
-      await page.click(confirmButtonSelector);
-      prizeClaimAttempted = true;
+      // Buscar el botón "Open Wish Box" usando XPath (más robusto que CSS selector)
+      console.log(`${getCurrentTimestamp()} 🔍 Buscando botón "Open Wish Box"...`);
+      await page.waitForXPath("//*[contains(text(), 'Open Wish Box')]", { timeout: 5000 });
       
-      // Esperar un momento después de reclamar el premio
-      console.log(`${getCurrentTimestamp()} ⏳ Esperando después de reclamar el premio...`);
-      await page.waitForTimeout(5000);
+      const [confirmButton] = await page.$x("//*[contains(text(), 'Open Wish Box')]");
+      
+      if (confirmButton) {
+        console.log(`${getCurrentTimestamp()} ✅ Botón de confirmación encontrado. Haciendo segundo clic para reclamar el premio...`);
+        await confirmButton.click();
+        prizeClaimAttempted = true;
+        
+        // Esperar un momento después de reclamar el premio
+        console.log(`${getCurrentTimestamp()} ⏳ Esperando después de reclamar el premio...`);
+        await page.waitForTimeout(5000);
+      }
+
       
     } catch (confirmButtonError) {
       // Si no se encuentra el botón de confirmación, podría ser que ya esté en conteo regresivo
