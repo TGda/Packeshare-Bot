@@ -191,8 +191,23 @@ async function runCycle() {
 
     // --- LÓGICA MEJORADA: Verificar balance antes de reclamar ---
     console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance ANTES de intentar reclamar...`);
-    await page.waitForSelector('div.money span', { timeout: 15000 });
-    const balanceBefore = await page.$eval('div.money span', el => el.textContent);
+    // CAMBIO 1: Selector mejorado para obtener el balance correcto
+    await page.waitForSelector('div.money', { timeout: 15000 });
+    const balanceBefore = await page.evaluate(() => {
+      // Buscar el elemento que contiene el balance (el número después de la imagen money)
+      const moneyDiv = document.querySelector('div.money');
+      if (moneyDiv) {
+        // El siguiente elemento hermano que contenga números
+        let nextEl = moneyDiv.nextElementSibling;
+        while (nextEl) {
+          if (/[\d,]+/.test(nextEl.textContent)) {
+            return nextEl.textContent.trim();
+          }
+          nextEl = nextEl.nextElementSibling;
+        }
+      }
+      return '0';
+    });
     console.log(`${getCurrentTimestamp()} 💰 Balance antes: ${balanceBefore}`);
 
     // Primer clic: Hacer clic en el elemento del premio
@@ -232,39 +247,45 @@ async function runCycle() {
         console.log(`${getCurrentTimestamp()} ⏳ Esperando después de reclamar el premio...`);
         await page.waitForTimeout(5000);
       }
-
       
     } catch (confirmButtonError) {
       // Si no se encuentra el botón de confirmación, podría ser que ya esté en conteo regresivo
       console.log(`${getCurrentTimestamp()} ℹ️ No se encontró botón de confirmación. Verificando si hay conteo regresivo...`);
       
       try {
-        await page.waitForSelector('div.time', { timeout: 5000 });
-        const countdownText = await page.$eval('div.time', el => el.textContent);
-        console.log(`${getCurrentTimestamp()} ⏳ Conteo regresivo encontrado (sin necesidad de confirmar): ${countdownText.trim()}`);
+        // CAMBIO 2: Buscar el temporizador usando XPath en lugar de selector CSS
+        console.log(`${getCurrentTimestamp()} 🔍 Buscando temporizador con formato "X hours Y min Z sec"...`);
+        await page.waitForXPath("//*[contains(text(), 'hours') and contains(text(), 'min') and contains(text(), 'sec')]", { timeout: 5000 });
         
-        // Parsear el tiempo y calcular espera
-        const timeObj = parseCountdownText(countdownText.trim());
-        const waitTimeMs = timeToMilliseconds(timeObj) + 20000; // +20 segundos
+        const [timerElement] = await page.$x("//*[contains(text(), 'hours') and contains(text(), 'min') and contains(text(), 'sec')]");
         
-        // Programar el próximo ciclo
-        const { dateStr: futureDateTimeDate, timeStr: futureDateTimeTime } = getFutureDateTime(waitTimeMs);
-        const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
-        console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${futureDateTimeDate} a las ${futureDateTimeTime} que son aproximadamente en ${minutes} minutos...`);
-        
-        // Cerrar la posible ventana emergente si existe
-        try {
-          const closeButtonSelector = "body > div.dialog-flow-box > div > img.close-button";
-          await page.waitForSelector(closeButtonSelector, { timeout: 3000 });
-          await page.click(closeButtonSelector);
-          console.log(`${getCurrentTimestamp()} ❌ Ventana emergente cerrada automáticamente.`);
-        } catch (e) {
-          console.log(`${getCurrentTimestamp()} ℹ️ No se encontró ventana emergente para cerrar (esto es normal).`);
+        if (timerElement) {
+          const countdownText = await page.evaluate(el => el.textContent, timerElement);
+          console.log(`${getCurrentTimestamp()} ⏳ Conteo regresivo encontrado (sin necesidad de confirmar): ${countdownText.trim()}`);
+          
+          // Parsear el tiempo y calcular espera
+          const timeObj = parseCountdownText(countdownText.trim());
+          const waitTimeMs = timeToMilliseconds(timeObj) + 20000; // +20 segundos
+          
+          // Programar el próximo ciclo
+          const { dateStr: futureDateTimeDate, timeStr: futureDateTimeTime } = getFutureDateTime(waitTimeMs);
+          const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
+          console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${futureDateTimeDate} a las ${futureDateTimeTime} que son aproximadamente en ${minutes} minutos...`);
+          
+          // Cerrar la posible ventana emergente si existe
+          try {
+            const closeButtonSelector = "body > div.dialog-flow-box > div > img.close-button";
+            await page.waitForSelector(closeButtonSelector, { timeout: 3000 });
+            await page.click(closeButtonSelector);
+            console.log(`${getCurrentTimestamp()} ❌ Ventana emergente cerrada automáticamente.`);
+          } catch (e) {
+            console.log(`${getCurrentTimestamp()} ℹ️ No se encontró ventana emergente para cerrar (esto es normal).`);
+          }
+          
+          // Esperar el tiempo calculado antes de repetir
+          setTimeout(runCycle, waitTimeMs);
+          return; // Salir de la función
         }
-        
-        // Esperar el tiempo calculado antes de repetir
-        setTimeout(runCycle, waitTimeMs);
-        return; // Salir de la función
         
       } catch (countdownError) {
         console.log(`${getCurrentTimestamp()} ⚠️ No se encontró ni botón de confirmación ni conteo regresivo. Reintentando en 5 minutos...`);
@@ -273,7 +294,7 @@ async function runCycle() {
       }
     }
 
-    // --- LÓGICA MEJORADA: Verificar balance DESPUÉS de reclamar ---
+        // --- LÓGICA MEJORADA: Verificar balance DESPUÉS de reclamar ---
     if (prizeClaimAttempted) {
         // Refrescar la página para obtener el balance actualizado
         console.log(`${getCurrentTimestamp()} 🔄 Refrescando página para obtener balance DESPUÉS de reclamar...`);
@@ -281,8 +302,23 @@ async function runCycle() {
         await page.waitForTimeout(3000);
         
         console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance DESPUÉS de intentar reclamar...`);
-        await page.waitForSelector('div.money span', { timeout: 15000 });
-        const balanceAfter = await page.$eval('div.money span', el => el.textContent);
+        // CAMBIO 3: Mismo selector mejorado para obtener el balance correcto
+        await page.waitForSelector('div.money', { timeout: 15000 });
+        const balanceAfter = await page.evaluate(() => {
+          // Buscar el elemento que contiene el balance (el número después de la imagen money)
+          const moneyDiv = document.querySelector('div.money');
+          if (moneyDiv) {
+            // El siguiente elemento hermano que contenga números
+            let nextEl = moneyDiv.nextElementSibling;
+            while (nextEl) {
+              if (/[\d,]+/.test(nextEl.textContent)) {
+                return nextEl.textContent.trim();
+              }
+              nextEl = nextEl.nextElementSibling;
+            }
+          }
+          return '0';
+        });
         console.log(`${getCurrentTimestamp()} 💰 Balance después: ${balanceAfter}`);
         
         const balanceIncreased = parseFloat(balanceAfter.replace(/,/g, '')) > parseFloat(balanceBefore.replace(/,/g, ''));
@@ -308,32 +344,38 @@ async function runCycle() {
       // Esperar un momento para que se abra el popup
       await page.waitForTimeout(3000);
       
-      // Verificar si aparece el conteo regresivo
-      await page.waitForSelector('div.time', { timeout: 5000 });
-      const countdownText = await page.$eval('div.time', el => el.textContent);
-      console.log(`${getCurrentTimestamp()} ⏱️ Nuevo conteo regresivo encontrado: ${countdownText.trim()}`);
+      // CAMBIO 4: Buscar el temporizador usando XPath en lugar de selector CSS
+      console.log(`${getCurrentTimestamp()} 🔍 Buscando temporizador con formato "X hours Y min Z sec"...`);
+      await page.waitForXPath("//*[contains(text(), 'hours') and contains(text(), 'min') and contains(text(), 'sec')]", { timeout: 5000 });
       
-      // Parsear el tiempo y calcular espera
-      const timeObj = parseCountdownText(countdownText.trim());
-      const waitTimeMs = timeToMilliseconds(timeObj) + 20000; // +20 segundos
+      const [timerElement] = await page.$x("//*[contains(text(), 'hours') and contains(text(), 'min') and contains(text(), 'sec')]");
       
-      // Programar el próximo ciclo
-      const { dateStr: futureDateTimeDate, timeStr: futureDateTimeTime } = getFutureDateTime(waitTimeMs);
-      const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
-      console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${futureDateTimeDate} a las ${futureDateTimeTime} que son aproximadamente en ${minutes} minutos...`);
-      
-      // Cerrar la posible ventana emergente si existe
-      try {
-        const closeButtonSelector = "body > div.dialog-flow-box > div > img.close-button";
-        await page.waitForSelector(closeButtonSelector, { timeout: 3000 });
-        await page.click(closeButtonSelector);
-        console.log(`${getCurrentTimestamp()} ❌ Ventana emergente cerrada automáticamente.`);
-      } catch (e) {
-        console.log(`${getCurrentTimestamp()} ℹ️ No se encontró ventana emergente para cerrar (esto es normal).`);
+      if (timerElement) {
+        const countdownText = await page.evaluate(el => el.textContent, timerElement);
+        console.log(`${getCurrentTimestamp()} ⏱️ Nuevo conteo regresivo encontrado: ${countdownText.trim()}`);
+        
+        // Parsear el tiempo y calcular espera
+        const timeObj = parseCountdownText(countdownText.trim());
+        const waitTimeMs = timeToMilliseconds(timeObj) + 20000; // +20 segundos
+        
+        // Programar el próximo ciclo
+        const { dateStr: futureDateTimeDate, timeStr: futureDateTimeTime } = getFutureDateTime(waitTimeMs);
+        const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
+        console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${futureDateTimeDate} a las ${futureDateTimeTime} que son aproximadamente en ${minutes} minutos...`);
+        
+        // Cerrar la posible ventana emergente si existe
+        try {
+          const closeButtonSelector = "body > div.dialog-flow-box > div > img.close-button";
+          await page.waitForSelector(closeButtonSelector, { timeout: 3000 });
+          await page.click(closeButtonSelector);
+          console.log(`${getCurrentTimestamp()} ❌ Ventana emergente cerrada automáticamente.`);
+        } catch (e) {
+          console.log(`${getCurrentTimestamp()} ℹ️ No se encontró ventana emergente para cerrar (esto es normal).`);
+        }
+        
+        // Esperar el tiempo calculado antes de repetir
+        setTimeout(runCycle, waitTimeMs);
       }
-      
-      // Esperar el tiempo calculado antes de repetir
-      setTimeout(runCycle, waitTimeMs);
       
     } catch (countdownError) {
       console.log(`${getCurrentTimestamp()} ⚠️ No se pudo obtener el nuevo conteo regresivo. Reintentando en 5 minutos...`);
