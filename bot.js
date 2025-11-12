@@ -196,7 +196,7 @@ async function runCycle() {
 
     // Primer clic: Hacer clic en el elemento del premio
     console.log(`${getCurrentTimestamp()} 👆 Haciendo primer clic en el elemento del premio...`);
-    const selectorGift = "img[alt*='flow']";
+    const selectorGift = "img[class*='flow']";
 
     
     try {
@@ -365,7 +365,7 @@ async function runCycle() {
           // Extraer el patrón "X hours Y min Z sec"
           const match = parentText.match(/(\d+)\s*hours?\s+(\d+)\s*min\s+(\d+)\s*sec/);
           if (match) {
-            countdownText = `${match} hours ${match} min ${match} sec`;
+            countdownText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
           }
         }
       } catch (e) {
@@ -377,7 +377,7 @@ async function runCycle() {
         const allText = await page.evaluate(() => document.body.innerText);
         const match = allText.match(/(\d+)\s*hours?\s+(\d+)\s*min\s+(\d+)\s*sec/);
         if (match) {
-          countdownText = `${match} hours ${match} min ${match} sec`;
+          countdownText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
         }
       }
       
