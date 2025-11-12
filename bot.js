@@ -141,7 +141,6 @@ async function runCycle() {
       page = await browser.newPage();
       
       console.log(`${getCurrentTimestamp()} 🌐 Abriendo página de login...`);
-      // Corregido: Eliminado espacio extra en la URL
       const response = await page.goto("https://www.packetshare.io/login/", {
         waitUntil: "networkidle2",
         timeout: 30000,
@@ -191,21 +190,8 @@ async function runCycle() {
 
     // --- LÓGICA MEJORADA: Verificar balance antes de reclamar ---
     console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance ANTES de intentar reclamar...`);
-    // CAMBIO 1: Selector que obtiene el balance correcto (solo el número, no el "Equivalent to")
-    await page.waitForSelector('image[alt="money"]', { timeout: 15000 });
-    const balanceBefore = await page.evaluate(() => {
-      // Obtener todos los elementos genéricos después de la imagen money
-      const allGenericElements = Array.from(document.querySelectorAll('generic'));
-      // Buscar el primero que contenga solo números y comas
-      for (let el of allGenericElements) {
-        const text = el.textContent.trim();
-        if (/^[\d,]+$/.test(text)) { // Solo números y comas
-          return text;
-        }
-      }
-      return '0';
-    });
-
+    await page.waitForTimeout(2000);
+    const balanceBefore = await page.$eval('div.money span', el => el.textContent);
     console.log(`${getCurrentTimestamp()} 💰 Balance antes: ${balanceBefore}`);
 
     // Primer clic: Hacer clic en el elemento del premio
@@ -251,14 +237,44 @@ async function runCycle() {
       console.log(`${getCurrentTimestamp()} ℹ️ No se encontró botón de confirmación. Verificando si hay conteo regresivo...`);
       
       try {
-        // CAMBIO 2: Buscar el temporizador usando XPath en lugar de selector CSS
-        console.log(`${getCurrentTimestamp()} 🔍 Buscando temporizador con formato "X hours Y min Z sec"...`);
-        await page.waitForXPath("//*[contains(text(), 'hours') and contains(text(), 'min') and contains(text(), 'sec')]", { timeout: 5000 });
+        // Buscar el temporizador de forma más robusta
+        console.log(`${getCurrentTimestamp()} 🔍 Buscando temporizador...`);
         
-        const [timerElement] = await page.$x("//*[contains(text(), 'hours') and contains(text(), 'min') and contains(text(), 'sec')]");
+        let countdownText = null;
+        try {
+          // Intentar primero con XPath
+          const [timerElement] = await page.$x("//*[contains(text(), 'hours')]");
+          if (timerElement) {
+            const parentText = await page.evaluate(el => {
+              let text = '';
+              // Obtener el texto de este elemento y sus hermanos
+              let parent = el.parentElement;
+              for (let child of parent.children) {
+                text += child.textContent + ' ';
+              }
+              return text;
+            }, timerElement);
+            
+            // Extraer el patrón "X hours Y min Z sec"
+            const match = parentText.match(/(\d+)\s*hours?\s+(\d+)\s*min\s+(\d+)\s*sec/);
+            if (match) {
+              countdownText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
+            }
+          }
+        } catch (e) {
+          console.log(`${getCurrentTimestamp()} 🔍 Intentando búsqueda alternativa del temporizador...`);
+        }
         
-        if (timerElement) {
-          const countdownText = await page.evaluate(el => el.textContent, timerElement);
+        // Si no encontró con XPath, intentar obtener todo el contenido del popup
+        if (!countdownText) {
+          const allText = await page.evaluate(() => document.body.innerText);
+          const match = allText.match(/(\d+)\s*hours?\s+(\d+)\s*min\s+(\d+)\s*sec/);
+          if (match) {
+            countdownText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
+          }
+        }
+        
+        if (countdownText) {
           console.log(`${getCurrentTimestamp()} ⏳ Conteo regresivo encontrado (sin necesidad de confirmar): ${countdownText.trim()}`);
           
           // Parsear el tiempo y calcular espera
@@ -292,7 +308,7 @@ async function runCycle() {
       }
     }
 
-        // --- LÓGICA MEJORADA: Verificar balance DESPUÉS de reclamar ---
+    // --- LÓGICA MEJORADA: Verificar balance DESPUÉS de reclamar ---
     if (prizeClaimAttempted) {
         // Refrescar la página para obtener el balance actualizado
         console.log(`${getCurrentTimestamp()} 🔄 Refrescando página para obtener balance DESPUÉS de reclamar...`);
@@ -300,21 +316,8 @@ async function runCycle() {
         await page.waitForTimeout(3000);
         
         console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance DESPUÉS de intentar reclamar...`);
-        // CAMBIO 3: Mismo selector mejorado para obtener el balance correcto
-        await page.waitForSelector('image[alt="money"]', { timeout: 15000 });
-        const balanceAfter = await page.evaluate(() => {
-          // Obtener todos los elementos genéricos después de la imagen money
-          const allGenericElements = Array.from(document.querySelectorAll('generic'));
-          // Buscar el primero que contenga solo números y comas
-          for (let el of allGenericElements) {
-            const text = el.textContent.trim();
-            if (/^[\d,]+$/.test(text)) { // Solo números y comas
-              return text;
-            }
-          }
-          return '0';
-        });
-
+        await page.waitForTimeout(2000);
+        const balanceAfter = await page.$eval('div.money span', el => el.textContent);
         console.log(`${getCurrentTimestamp()} 💰 Balance después: ${balanceAfter}`);
         
         const balanceIncreased = parseFloat(balanceAfter.replace(/,/g, '')) > parseFloat(balanceBefore.replace(/,/g, ''));
@@ -340,7 +343,7 @@ async function runCycle() {
       // Esperar un momento para que se abra el popup
       await page.waitForTimeout(3000);
       
-      // CAMBIO 4: Buscar el temporizador de forma más robusta
+      // Buscar el temporizador de forma más robusta
       console.log(`${getCurrentTimestamp()} 🔍 Buscando temporizador...`);
       
       let countdownText = null;
@@ -361,7 +364,7 @@ async function runCycle() {
           // Extraer el patrón "X hours Y min Z sec"
           const match = parentText.match(/(\d+)\s*hours?\s+(\d+)\s*min\s+(\d+)\s*sec/);
           if (match) {
-            countdownText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
+            countdownText = `${match} hours ${match} min ${match} sec`;
           }
         }
       } catch (e) {
@@ -373,18 +376,17 @@ async function runCycle() {
         const allText = await page.evaluate(() => document.body.innerText);
         const match = allText.match(/(\d+)\s*hours?\s+(\d+)\s*min\s+(\d+)\s*sec/);
         if (match) {
-          countdownText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
+          countdownText = `${match} hours ${match} min ${match} sec`;
         }
       }
       
       if (countdownText) {
-        console.log(`${getCurrentTimestamp()} ⏳ Conteo regresivo encontrado: ${countdownText.trim()}`);
+        console.log(`${getCurrentTimestamp()} ⏱️ Nuevo conteo regresivo encontrado: ${countdownText.trim()}`);
         
         // Parsear el tiempo y calcular espera
         const timeObj = parseCountdownText(countdownText.trim());
         const waitTimeMs = timeToMilliseconds(timeObj) + 20000; // +20 segundos
         
-      
         // Programar el próximo ciclo
         const { dateStr: futureDateTimeDate, timeStr: futureDateTimeTime } = getFutureDateTime(waitTimeMs);
         const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
