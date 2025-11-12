@@ -200,11 +200,20 @@ async function runCycle() {
 
     
     try {
-      await page.waitForSelector(selectorGift, { timeout: 10000 });
-      await page.click(selectorGift);
+      // Esperar a que la imagen del regalo esté disponible usando XPath
+      // Buscar cualquier imagen cuyo src contenga "img_receive" o "img_full"
+      await page.waitForXPath("//img[contains(@src, 'img_receive') or contains(@src, 'img_full')]", { timeout: 10000 });
+      
+      const [giftImg] = await page.$x("//img[contains(@src, 'img_receive') or contains(@src, 'img_full')]");
+      if (giftImg) {
+        await giftImg.click();
+      } else {
+        throw new Error("No se encontró la imagen del regalo");
+      }
     } catch (e) {
       throw new Error(`No se pudo hacer clic en el elemento del premio: ${e.message}`);
     }
+
 
     // Esperar un momento para que se abra el popup
     console.log(`${getCurrentTimestamp()} ⏳ Esperando apertura del popup...`);
