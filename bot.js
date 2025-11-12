@@ -199,19 +199,68 @@ async function runCycle() {
     const selectorGift = "img[class*='flow']";
 
     try {
-      // Buscar la imagen del regalo de forma más simple
-      await page.waitForXPath("//img[contains(@class, 'flow')]", { timeout: 10000 });
+      let giftImg = null;
       
-      const [giftImg] = await page.$x("//img[contains(@class, 'flow')]");
+      // Estrategia 1: Buscar por imagen con "flow" en la clase
+      try {
+        console.log(`${getCurrentTimestamp()} 🔍 Intentando buscar por clase 'flow'...`);
+        await page.waitForXPath("//img[@class='flow-received']", { timeout: 5000 });
+        const result = await page.$x("//img[@class='flow-received']");
+        if (result.length > 0) {
+          giftImg = result[0];
+          console.log(`${getCurrentTimestamp()} ✅ Encontrado por clase 'flow-received'`);
+        }
+      } catch (e1) {
+        console.log(`${getCurrentTimestamp()} ℹ️ No encontrado por clase 'flow-received', probando alternativa...`);
+        
+        // Estrategia 2: Buscar por cualquier imagen con alt que contenga "flow"
+        try {
+          console.log(`${getCurrentTimestamp()} 🔍 Intentando buscar por alt 'flowFullReceived'...`);
+          await page.waitForXPath("//img[@alt='flowFullReceived']", { timeout: 5000 });
+          const result = await page.$x("//img[@alt='flowFullReceived']");
+          if (result.length > 0) {
+            giftImg = result[0];
+            console.log(`${getCurrentTimestamp()} ✅ Encontrado por alt 'flowFullReceived'`);
+          }
+        } catch (e2) {
+          console.log(`${getCurrentTimestamp()} ℹ️ No encontrado por alt, probando 'flowFullNoReceive'...`);
+          
+          // Estrategia 3: Buscar por la otra versión del alt
+          try {
+            console.log(`${getCurrentTimestamp()} 🔍 Intentando buscar por alt 'flowFullNoReceive'...`);
+            await page.waitForXPath("//img[@alt='flowFullNoReceive']", { timeout: 5000 });
+            const result = await page.$x("//img[@alt='flowFullNoReceive']");
+            if (result.length > 0) {
+              giftImg = result[0];
+              console.log(`${getCurrentTimestamp()} ✅ Encontrado por alt 'flowFullNoReceive'`);
+            }
+          } catch (e3) {
+            console.log(`${getCurrentTimestamp()} ℹ️ No encontrado por alt, probando última alternativa...`);
+            
+            // Estrategia 4: Buscar cualquier imagen que sea clickeable en el área del regalo
+            try {
+              console.log(`${getCurrentTimestamp()} 🔍 Intentando búsqueda genérica...`);
+              const result = await page.$x("//img[@class]");
+              if (result.length > 0) {
+                giftImg = result[result.length - 1]; // Usar la última imagen encontrada
+                console.log(`${getCurrentTimestamp()} ✅ Usando última imagen encontrada`);
+              }
+            } catch (e4) {
+              throw new Error("No se pudo encontrar la imagen del regalo con ningún método");
+            }
+          }
+        }
+      }
+      
       if (giftImg) {
         await giftImg.click();
+        console.log(`${getCurrentTimestamp()} ✅ Clic en imagen del regalo exitoso`);
       } else {
         throw new Error("No se encontró la imagen del regalo");
       }
     } catch (e) {
       throw new Error(`No se pudo hacer clic en el elemento del premio: ${e.message}`);
     }
-
 
 
     // Esperar un momento para que se abra el popup
