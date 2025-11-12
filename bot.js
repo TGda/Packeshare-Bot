@@ -338,8 +338,21 @@ async function runCycle() {
     try {
       // Hacer clic nuevamente en el elemento del premio para ver el nuevo conteo
       console.log(`${getCurrentTimestamp()} 👆 Haciendo clic para verificar nuevo conteo regresivo...`);
-      await page.waitForSelector(selectorGift, { timeout: 10000 });
-      await page.click(selectorGift);
+      
+      try {
+        // Buscar cualquier imagen cuyo src contenga "img_receive" o "img_full"
+        await page.waitForXPath("//img[contains(@src, 'img_receive') or contains(@src, 'img_full')]", { timeout: 10000 });
+        
+        const [giftImg] = await page.$x("//img[contains(@src, 'img_receive') or contains(@src, 'img_full')]");
+        if (giftImg) {
+          await giftImg.click();
+        } else {
+          throw new Error("No se encontró la imagen del regalo");
+        }
+      } catch (e) {
+        throw new Error(`No se pudo hacer clic en el elemento del premio: ${e.message}`);
+      }
+
       
       // Esperar un momento para que se abra el popup
       await page.waitForTimeout(3000);
