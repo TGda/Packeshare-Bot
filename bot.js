@@ -191,23 +191,21 @@ async function runCycle() {
 
     // --- LÓGICA MEJORADA: Verificar balance antes de reclamar ---
     console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance ANTES de intentar reclamar...`);
-    // CAMBIO 1: Selector mejorado para obtener el balance correcto
-    await page.waitForSelector('div.money', { timeout: 15000 });
+    // CAMBIO 1: Selector que obtiene el balance correcto (solo el número, no el "Equivalent to")
+    await page.waitForSelector('image[alt="money"]', { timeout: 15000 });
     const balanceBefore = await page.evaluate(() => {
-      // Buscar el elemento que contiene el balance (el número después de la imagen money)
-      const moneyDiv = document.querySelector('div.money');
-      if (moneyDiv) {
-        // El siguiente elemento hermano que contenga números
-        let nextEl = moneyDiv.nextElementSibling;
-        while (nextEl) {
-          if (/[\d,]+/.test(nextEl.textContent)) {
-            return nextEl.textContent.trim();
-          }
-          nextEl = nextEl.nextElementSibling;
+      // Obtener todos los elementos genéricos después de la imagen money
+      const allGenericElements = Array.from(document.querySelectorAll('generic'));
+      // Buscar el primero que contenga solo números y comas
+      for (let el of allGenericElements) {
+        const text = el.textContent.trim();
+        if (/^[\d,]+$/.test(text)) { // Solo números y comas
+          return text;
         }
       }
       return '0';
     });
+
     console.log(`${getCurrentTimestamp()} 💰 Balance antes: ${balanceBefore}`);
 
     // Primer clic: Hacer clic en el elemento del premio
@@ -303,22 +301,20 @@ async function runCycle() {
         
         console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance DESPUÉS de intentar reclamar...`);
         // CAMBIO 3: Mismo selector mejorado para obtener el balance correcto
-        await page.waitForSelector('div.money', { timeout: 15000 });
+        await page.waitForSelector('image[alt="money"]', { timeout: 15000 });
         const balanceAfter = await page.evaluate(() => {
-          // Buscar el elemento que contiene el balance (el número después de la imagen money)
-          const moneyDiv = document.querySelector('div.money');
-          if (moneyDiv) {
-            // El siguiente elemento hermano que contenga números
-            let nextEl = moneyDiv.nextElementSibling;
-            while (nextEl) {
-              if (/[\d,]+/.test(nextEl.textContent)) {
-                return nextEl.textContent.trim();
-              }
-              nextEl = nextEl.nextElementSibling;
+          // Obtener todos los elementos genéricos después de la imagen money
+          const allGenericElements = Array.from(document.querySelectorAll('generic'));
+          // Buscar el primero que contenga solo números y comas
+          for (let el of allGenericElements) {
+            const text = el.textContent.trim();
+            if (/^[\d,]+$/.test(text)) { // Solo números y comas
+              return text;
             }
           }
           return '0';
         });
+
         console.log(`${getCurrentTimestamp()} 💰 Balance después: ${balanceAfter}`);
         
         const balanceIncreased = parseFloat(balanceAfter.replace(/,/g, '')) > parseFloat(balanceBefore.replace(/,/g, ''));
@@ -344,20 +340,51 @@ async function runCycle() {
       // Esperar un momento para que se abra el popup
       await page.waitForTimeout(3000);
       
-      // CAMBIO 4: Buscar el temporizador usando XPath en lugar de selector CSS
-      console.log(`${getCurrentTimestamp()} 🔍 Buscando temporizador con formato "X hours Y min Z sec"...`);
-      await page.waitForXPath("//*[contains(text(), 'hours') and contains(text(), 'min') and contains(text(), 'sec')]", { timeout: 5000 });
+      // CAMBIO 4: Buscar el temporizador de forma más robusta
+      console.log(`${getCurrentTimestamp()} 🔍 Buscando temporizador...`);
       
-      const [timerElement] = await page.$x("//*[contains(text(), 'hours') and contains(text(), 'min') and contains(text(), 'sec')]");
+      let countdownText = null;
+      try {
+        // Intentar primero con XPath
+        const [timerElement] = await page.$x("//*[contains(text(), 'hours')]");
+        if (timerElement) {
+          const parentText = await page.evaluate(el => {
+            let text = '';
+            // Obtener el texto de este elemento y sus hermanos
+            let parent = el.parentElement;
+            for (let child of parent.children) {
+              text += child.textContent + ' ';
+            }
+            return text;
+          }, timerElement);
+          
+          // Extraer el patrón "X hours Y min Z sec"
+          const match = parentText.match(/(\d+)\s*hours?\s+(\d+)\s*min\s+(\d+)\s*sec/);
+          if (match) {
+            countdownText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
+          }
+        }
+      } catch (e) {
+        console.log(`${getCurrentTimestamp()} 🔍 Intentando búsqueda alternativa del temporizador...`);
+      }
       
-      if (timerElement) {
-        const countdownText = await page.evaluate(el => el.textContent, timerElement);
-        console.log(`${getCurrentTimestamp()} ⏱️ Nuevo conteo regresivo encontrado: ${countdownText.trim()}`);
+      // Si no encontró con XPath, intentar obtener todo el contenido del popup
+      if (!countdownText) {
+        const allText = await page.evaluate(() => document.body.innerText);
+        const match = allText.match(/(\d+)\s*hours?\s+(\d+)\s*min\s+(\d+)\s*sec/);
+        if (match) {
+          countdownText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
+        }
+      }
+      
+      if (countdownText) {
+        console.log(`${getCurrentTimestamp()} ⏳ Conteo regresivo encontrado: ${countdownText.trim()}`);
         
         // Parsear el tiempo y calcular espera
         const timeObj = parseCountdownText(countdownText.trim());
         const waitTimeMs = timeToMilliseconds(timeObj) + 20000; // +20 segundos
         
+      
         // Programar el próximo ciclo
         const { dateStr: futureDateTimeDate, timeStr: futureDateTimeTime } = getFutureDateTime(waitTimeMs);
         const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
