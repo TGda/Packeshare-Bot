@@ -196,7 +196,8 @@ async function runCycle() {
 
     // Primer clic: Hacer clic en el elemento del premio
     console.log(`${getCurrentTimestamp()} 👆 Haciendo primer clic en el elemento del premio...`);
-    const selectorGift = "#__nuxt > div.ucenter-header > div.header > div > div.flow-box > img";
+    const selectorGift = "img[alt*='flow']";
+
     
     try {
       await page.waitForSelector(selectorGift, { timeout: 10000 });
