@@ -198,11 +198,11 @@ async function runCycle() {
     console.log(`${getCurrentTimestamp()} 👆 Haciendo primer clic en el elemento del premio...`);
     const selectorGift = "img[class*='flow']";
 
-      try {
-      // Esperar a que la imagen del regalo esté disponible usando XPath
-      await page.waitForXPath("//img[contains(@src, 'img_receive') or contains(@src, 'img_full')]", { timeout: 10000 });
+    try {
+      // Buscar la imagen del regalo de forma más simple
+      await page.waitForXPath("//img[contains(@class, 'flow')]", { timeout: 10000 });
       
-      const [giftImg] = await page.$x("//img[contains(@src, 'img_receive') or contains(@src, 'img_full')]");
+      const [giftImg] = await page.$x("//img[contains(@class, 'flow')]");
       if (giftImg) {
         await giftImg.click();
       } else {
