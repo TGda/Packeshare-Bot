@@ -1,4 +1,4 @@
-// bot.js -- PackeshareBot v2.1R (Fixed Selector Logic & Robust Fallback)
+// bot.js -- PackeshareBot v2.1R (Fixed Selector Logic & Robust Fallback) - PARTE 1/2
 const puppeteer = require("puppeteer");
 const http = require("http");
 
@@ -170,7 +170,6 @@ async function runCycle() {
         } catch (e3) {
           console.log(`${getCurrentTimestamp()} ℹ️ No encontrado por alt, probando última alternativa...`);
           
-          // ÚLTIMA ESTRATEGIA ESPECÍFICA - Removido //img[@class] genérico
           try {
             console.log(`${getCurrentTimestamp()} 🔍 Intentando búsqueda por src...`);
             await page.waitForXPath("//img[contains(@src, 'img_receive') or contains(@src, 'img_full')]", { timeout: 5000 });
@@ -272,3 +271,148 @@ async function runCycle() {
         setTimeout(runCycle, 300000);
         return;
       }
+    }
+
+    // CONTINÚA EN LA PARTE 2...
+    // === BALANCE DESPUÉS DE RECLAMAR ===
+    if (prizeClaimAttempted) {
+      console.log(`${getCurrentTimestamp()} 🔄 Refrescando página para obtener balance DESPUÉS de reclamar...`);
+      await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
+      await page.waitForTimeout(3000);
+      
+      console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance DESPUÉS de intentar reclamar...`);
+      await page.waitForTimeout(2000);
+      const balanceAfter = await page.$eval('div.money span', el => el.textContent);
+      console.log(`${getCurrentTimestamp()} 💰 Balance después: ${balanceAfter}`);
+      
+      const balanceIncreased = parseFloat(balanceAfter.replace(/,/g, '')) > parseFloat(balanceBefore.replace(/,/g, ''));
+      
+      if (balanceIncreased) {
+        console.log(`${getCurrentTimestamp()} 🎉 Éxito: El balance aumentó. Premio reclamado.`);
+        await sendNotification("Premio reclamado con aumento de balance");
+      } else {
+        console.log(`${getCurrentTimestamp()} ⚠️ Advertencia: El balance NO aumentó después de reclamar. Puede que el premio haya sido $0 o haya un retraso en la actualización.`);
+      }
+    }
+
+    // === VERIFICAR NUEVO CONTEO REGRESIVO ===
+    console.log(`${getCurrentTimestamp()} 🔍 Verificando nuevo conteo regresivo...`);
+    try {
+      console.log(`${getCurrentTimestamp()} 👆 Haciendo clic para verificar nuevo conteo regresivo...`);
+      
+      try {
+        await page.waitForXPath("//img[contains(@src, 'img_receive') or contains(@src, 'img_full')]", { timeout: 10000 });
+        const [giftImg] = await page.$x("//img[contains(@src, 'img_receive') or contains(@src, 'img_full')]");
+        if (giftImg) {
+          await giftImg.click();
+        } else {
+          throw new Error("No se encontró la imagen del regalo");
+        }
+      } catch (e) {
+        throw new Error(`No se pudo hacer clic en el elemento del premio: ${e.message}`);
+      }
+
+      await page.waitForTimeout(3000);
+      
+      console.log(`${getCurrentTimestamp()} 🔍 Buscando temporizador...`);
+      
+      let countdownText = null;
+      try {
+        const [timerElement] = await page.$x("//*[contains(text(), 'hours')]");
+        if (timerElement) {
+          const parentText = await page.evaluate(el => {
+            let text = '';
+            let parent = el.parentElement;
+            for (let child of parent.children) {
+              text += child.textContent + ' ';
+            }
+            return text;
+          }, timerElement);
+          
+          const match = parentText.match(/(\d+)\s*hours?\s+(\d+)\s*min\s+(\d+)\s*sec/);
+          if (match) {
+            countdownText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
+          }
+        }
+      } catch (e) {
+        console.log(`${getCurrentTimestamp()} 🔍 Intentando búsqueda alternativa del temporizador...`);
+      }
+      
+      if (!countdownText) {
+        const allText = await page.evaluate(() => document.body.innerText);
+        const match = allText.match(/(\d+)\s*hours?\s+(\d+)\s*min\s+(\d+)\s*sec/);
+        if (match) {
+          countdownText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
+        }
+      }
+      
+      if (countdownText) {
+        console.log(`${getCurrentTimestamp()} ⏱️ Nuevo conteo regresivo encontrado: ${countdownText.trim()}`);
+        
+        const timeObj = parseCountdownText(countdownText.trim());
+        const waitTimeMs = timeToMilliseconds(timeObj) + 20000;
+        
+        const { dateStr: futureDateTimeDate, timeStr: futureDateTimeTime } = getFutureDateTime(waitTimeMs);
+        const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
+        console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${futureDateTimeDate} a las ${futureDateTimeTime} que son aproximadamente en ${minutes} minutos...`);
+        
+        try {
+          const closeButtonSelector = "body > div.dialog-flow-box > div > img.close-button";
+          await page.waitForSelector(closeButtonSelector, { timeout: 3000 });
+          await page.click(closeButtonSelector);
+          console.log(`${getCurrentTimestamp()} ❌ Ventana emergente cerrada automáticamente.`);
+        } catch (e) {
+          console.log(`${getCurrentTimestamp()} ℹ️ No se encontró ventana emergente para cerrar (esto es normal).`);
+        }
+        
+        setTimeout(runCycle, waitTimeMs);
+      } else {
+        console.log(`${getCurrentTimestamp()} ⚠️ No se pudo obtener el nuevo conteo regresivo. Reintentando en 5 minutos...`);
+        setTimeout(runCycle, 300000);
+      }
+      
+    } catch (countdownError) {
+      console.log(`${getCurrentTimestamp()} ⚠️ No se pudo obtener el nuevo conteo regresivo. Reintentando en 5 minutos...`);
+      setTimeout(runCycle, 300000);
+    }
+
+  } catch (err) {
+    console.error(`${getCurrentTimestamp()} ⚠️ Error en el ciclo:`, err.message);
+    
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (closeErr) {
+        console.error(`${getCurrentTimestamp()} ⚠️ Error al cerrar el navegador:`, closeErr.message);
+      }
+    }
+    
+    console.log(`${getCurrentTimestamp()} 🔄 Intentando reconectar en 60 segundos...`);
+    setTimeout(() => {
+      isFirstRun = true;
+      runCycle();
+    }, 60000);
+  }
+}
+
+// Iniciar el primer ciclo
+runCycle();
+
+// Manejar señales de cierre limpiamente
+process.on('SIGINT', async () => {
+  console.log(`${getCurrentTimestamp()} \n🛑 Recibida señal de interrupción. Cerrando...`);
+  if (browser) {
+    await browser.close();
+  }
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  console.log(`${getCurrentTimestamp()} \n🛑 Recibida señal de terminación. Cerrando...`);
+  if (browser) {
+    await browser.close();
+  }
+  process.exit(0);
+});
+
+// ---- FIN PackeshareBot v2.1R ----
