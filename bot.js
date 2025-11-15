@@ -1,4 +1,4 @@
-// bot.js -- PackeshareBot v2.1R (Fixed Selector Logic & Robust Fallback) - PARTE 1/2
+// bot.js -- PackeshareBot v2.2R (Fixed Gift Selector - alt="gift") - PARTE 1/2
 const puppeteer = require("puppeteer");
 const http = require("http");
 
@@ -133,54 +133,44 @@ async function runCycle() {
     const balanceBefore = await page.$eval('div.money span', el => el.textContent);
     console.log(`${getCurrentTimestamp()} 💰 Balance antes: ${balanceBefore}`);
 
-    // === BUSCAR Y CLICKEAR REGALO (ESTRATEGIAS ESPECÍFICAS) ===
-    console.log(`${getCurrentTimestamp()} 👆 Haciendo primer clic en el elemento del premio...`);
+    // === BUSCAR Y CLICKEAR REGALO (SELECTOR ACTUALIZADO) ===
+    console.log(`${getCurrentTimestamp()} 👆 Buscando elemento del regalo...`);
     let giftImg = null;
 
+    // ESTRATEGIA PRINCIPAL: Buscar por alt="gift"
     try {
-      console.log(`${getCurrentTimestamp()} 🔍 Intentando buscar por clase 'flow-received'...`);
-      await page.waitForXPath("//img[@class='flow-received']", { timeout: 5000 });
-      const result = await page.$x("//img[@class='flow-received']");
+      console.log(`${getCurrentTimestamp()} 🔍 Intentando buscar por alt='gift'...`);
+      await page.waitForXPath("//img[@alt='gift']", { timeout: 5000 });
+      const result = await page.$x("//img[@alt='gift']");
       if (result.length > 0) {
         giftImg = result[0];
-        console.log(`${getCurrentTimestamp()} ✅ Encontrado por clase 'flow-received'`);
+        console.log(`${getCurrentTimestamp()} ✅ Encontrado por alt='gift'`);
       }
     } catch (e1) {
-      console.log(`${getCurrentTimestamp()} ℹ️ No encontrado por clase 'flow-received', probando alternativa...`);
+      console.log(`${getCurrentTimestamp()} ℹ️ No encontrado por alt='gift', probando alternativas...`);
       
+      // Fallback a selectores anteriores por si cambian de nuevo
       try {
-        console.log(`${getCurrentTimestamp()} 🔍 Intentando buscar por alt 'flowFullReceived'...`);
-        await page.waitForXPath("//img[@alt='flowFullReceived']", { timeout: 5000 });
-        const result = await page.$x("//img[@alt='flowFullReceived']");
+        console.log(`${getCurrentTimestamp()} 🔍 Intentando buscar por clase 'flow-received'...`);
+        await page.waitForXPath("//img[@class='flow-received']", { timeout: 5000 });
+        const result = await page.$x("//img[@class='flow-received']");
         if (result.length > 0) {
           giftImg = result[0];
-          console.log(`${getCurrentTimestamp()} ✅ Encontrado por alt 'flowFullReceived'`);
+          console.log(`${getCurrentTimestamp()} ✅ Encontrado por clase 'flow-received'`);
         }
       } catch (e2) {
-        console.log(`${getCurrentTimestamp()} ℹ️ No encontrado por alt, probando 'flowFullNoReceive'...`);
+        console.log(`${getCurrentTimestamp()} ℹ️ No encontrado por clase, probando por src...`);
         
         try {
-          console.log(`${getCurrentTimestamp()} 🔍 Intentando buscar por alt 'flowFullNoReceive'...`);
-          await page.waitForXPath("//img[@alt='flowFullNoReceive']", { timeout: 5000 });
-          const result = await page.$x("//img[@alt='flowFullNoReceive']");
+          console.log(`${getCurrentTimestamp()} 🔍 Intentando búsqueda por src...`);
+          await page.waitForXPath("//img[contains(@src, 'img_receive') or contains(@src, 'img_full') or contains(@src, 'gift')]", { timeout: 5000 });
+          const result = await page.$x("//img[contains(@src, 'img_receive') or contains(@src, 'img_full') or contains(@src, 'gift')]");
           if (result.length > 0) {
-            giftImg = result[0];
-            console.log(`${getCurrentTimestamp()} ✅ Encontrado por alt 'flowFullNoReceive'`);
+            giftImg = result[result.length - 1];
+            console.log(`${getCurrentTimestamp()} ✅ Encontrado por src`);
           }
         } catch (e3) {
-          console.log(`${getCurrentTimestamp()} ℹ️ No encontrado por alt, probando última alternativa...`);
-          
-          try {
-            console.log(`${getCurrentTimestamp()} 🔍 Intentando búsqueda por src...`);
-            await page.waitForXPath("//img[contains(@src, 'img_receive') or contains(@src, 'img_full')]", { timeout: 5000 });
-            const result = await page.$x("//img[contains(@src, 'img_receive') or contains(@src, 'img_full')]");
-            if (result.length > 0) {
-              giftImg = result[result.length - 1];
-              console.log(`${getCurrentTimestamp()} ✅ Encontrado por src`);
-            }
-          } catch (e4) {
-            throw new Error("No se pudo encontrar la imagen del regalo con ningún método");
-          }
+          throw new Error("No se pudo encontrar la imagen del regalo con ningún método");
         }
       }
     }
@@ -196,7 +186,8 @@ async function runCycle() {
     console.log(`${getCurrentTimestamp()} ⏳ Esperando apertura del popup...`);
     await page.waitForTimeout(3000);
 
-    // === VERIFICAR CONTENIDO DEL POPUP ===
+    // CONTINÚA EN LA PARTE 2...
+        // === VERIFICAR CONTENIDO DEL POPUP ===
     console.log(`${getCurrentTimestamp()} 🔍 Verificando contenido del popup...`);
     let prizeClaimAttempted = false;
 
@@ -273,7 +264,6 @@ async function runCycle() {
       }
     }
 
-    // CONTINÚA EN LA PARTE 2...
     // === BALANCE DESPUÉS DE RECLAMAR ===
     if (prizeClaimAttempted) {
       console.log(`${getCurrentTimestamp()} 🔄 Refrescando página para obtener balance DESPUÉS de reclamar...`);
@@ -301,15 +291,29 @@ async function runCycle() {
       console.log(`${getCurrentTimestamp()} 👆 Haciendo clic para verificar nuevo conteo regresivo...`);
       
       try {
-        await page.waitForXPath("//img[contains(@src, 'img_receive') or contains(@src, 'img_full')]", { timeout: 10000 });
-        const [giftImg] = await page.$x("//img[contains(@src, 'img_receive') or contains(@src, 'img_full')]");
-        if (giftImg) {
-          await giftImg.click();
+        // Buscar de nuevo por alt="gift" primero
+        await page.waitForXPath("//img[@alt='gift']", { timeout: 5000 });
+        const result = await page.$x("//img[@alt='gift']");
+        if (result.length > 0) {
+          await result[0].click();
+          console.log(`${getCurrentTimestamp()} ✅ Segundo clic en regalo exitoso`);
         } else {
-          throw new Error("No se encontró la imagen del regalo");
+          throw new Error("No se encontró la imagen del regalo para segundo clic");
         }
       } catch (e) {
-        throw new Error(`No se pudo hacer clic en el elemento del premio: ${e.message}`);
+        // Fallback a búsqueda por src
+        try {
+          await page.waitForXPath("//img[contains(@src, 'img_receive') or contains(@src, 'img_full') or contains(@src, 'gift')]", { timeout: 5000 });
+          const [giftImg] = await page.$x("//img[contains(@src, 'img_receive') or contains(@src, 'img_full') or contains(@src, 'gift')]");
+          if (giftImg) {
+            await giftImg.click();
+            console.log(`${getCurrentTimestamp()} ✅ Segundo clic en regalo exitoso (por src)`);
+          } else {
+            throw new Error("No se encontró la imagen del regalo");
+          }
+        } catch (e2) {
+          throw new Error(`No se pudo hacer clic en el elemento del premio: ${e2.message}`);
+        }
       }
 
       await page.waitForTimeout(3000);
@@ -415,4 +419,4 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
-// ---- FIN PackeshareBot v2.1R ----
+// ---- FIN PackeshareBot v2.2R ----
