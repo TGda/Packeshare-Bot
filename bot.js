@@ -1,6 +1,12 @@
-// bot.js -- PackeshareBot v2.2R (Fixed Gift Selector - alt="gift") - PARTE 1/2
+// bot.js -- PackeshareBot v2.3R (Fixed Loop + Progressive Retries) - PARTE 1/2
 const puppeteer = require("puppeteer");
 const http = require("http");
+
+// == VARIABLES GLOBALES ==
+let browser;
+let page;
+let isFirstRun = true;
+let failedAttempts = 0; // Contador de intentos fallidos
 
 // == UTILIDADES ==
 function getCurrentTimestamp() {
@@ -44,6 +50,22 @@ function getFutureDateTime(milliseconds) {
   return { dateStr, timeStr };
 }
 
+// Función para calcular tiempo de espera según intentos fallidos
+function getRetryDelay(attempts) {
+  if (attempts === 0) return 0;
+  if (attempts === 1) return 5 * 60 * 1000;      // 5 minutos
+  if (attempts === 2) return 15 * 60 * 1000;     // 15 minutos
+  if (attempts === 3) return 30 * 60 * 1000;     // 30 minutos
+  return 2 * 60 * 60 * 1000;                     // 2 horas para 4+ intentos
+}
+
+function getRetryDelayText(attempts) {
+  if (attempts === 1) return "5 minutos";
+  if (attempts === 2) return "15 minutos";
+  if (attempts === 3) return "30 minutos";
+  return "2 horas";
+}
+
 async function sendNotification(message) {
   const notificationUrl = process.env.NOTIFICATION;
   if (!notificationUrl) {
@@ -82,10 +104,6 @@ async function sendNotification(message) {
     req.end();
   });
 }
-
-let browser;
-let page;
-let isFirstRun = true;
 
 // == CICLO PRINCIPAL ==
 async function runCycle() {
@@ -133,7 +151,7 @@ async function runCycle() {
     const balanceBefore = await page.$eval('div.money span', el => el.textContent);
     console.log(`${getCurrentTimestamp()} 💰 Balance antes: ${balanceBefore}`);
 
-    // === BUSCAR Y CLICKEAR REGALO (SELECTOR ACTUALIZADO) ===
+    // === BUSCAR Y CLICKEAR REGALO ===
     console.log(`${getCurrentTimestamp()} 👆 Buscando elemento del regalo...`);
     let giftImg = null;
 
@@ -149,7 +167,7 @@ async function runCycle() {
     } catch (e1) {
       console.log(`${getCurrentTimestamp()} ℹ️ No encontrado por alt='gift', probando alternativas...`);
       
-      // Fallback a selectores anteriores por si cambian de nuevo
+      // Fallback a selectores anteriores
       try {
         console.log(`${getCurrentTimestamp()} 🔍 Intentando buscar por clase 'flow-received'...`);
         await page.waitForXPath("//img[@class='flow-received']", { timeout: 5000 });
@@ -186,91 +204,138 @@ async function runCycle() {
     console.log(`${getCurrentTimestamp()} ⏳ Esperando apertura del popup...`);
     await page.waitForTimeout(3000);
 
-    // CONTINÚA EN LA PARTE 2...
-        // === VERIFICAR CONTENIDO DEL POPUP ===
+    // === VERIFICAR CONTENIDO DEL POPUP (DENTRO DEL POPUP SOLAMENTE) ===
     console.log(`${getCurrentTimestamp()} 🔍 Verificando contenido del popup...`);
-    let prizeClaimAttempted = false;
-
+    
+    // Primero buscar el temporizador (siempre debe estar)
+    let countdownText = null;
+    
     try {
-      console.log(`${getCurrentTimestamp()} 🔍 Buscando botón "Open Wish Box"...`);
-      await page.waitForXPath("//*[contains(text(), 'Open Wish Box')]", { timeout: 5000 });
-      const [confirmButton] = await page.$x("//*[contains(text(), 'Open Wish Box')]");
-      if (confirmButton) {
-        console.log(`${getCurrentTimestamp()} ✅ Botón de confirmación encontrado. Haciendo segundo clic para reclamar el premio...`);
-        await confirmButton.click();
-        prizeClaimAttempted = true;
-        console.log(`${getCurrentTimestamp()} ⏳ Esperando después de reclamar el premio...`);
-        await page.waitForTimeout(5000);
-      }
-    } catch (confirmButtonError) {
-      console.log(`${getCurrentTimestamp()} ℹ️ No se encontró botón de confirmación. Verificando si hay conteo regresivo...`);
+      console.log(`${getCurrentTimestamp()} 🔍 Buscando temporizador en el popup...`);
       
-      try {
-        console.log(`${getCurrentTimestamp()} 🔍 Buscando temporizador...`);
-        let countdownText = null;
-        
-        try {
-          const [timerElement] = await page.$x("//*[contains(text(), 'hours')]");
-          if (timerElement) {
-            const parentText = await page.evaluate(el => {
-              let text = '';
-              let parent = el.parentElement;
-              for (let child of parent.children) {
-                text += child.textContent + ' ';
-              }
-              return text;
-            }, timerElement);
-            const match = parentText.match(/(\d+)\s*hours?\s+(\d+)\s*min\s+(\d+)\s*sec/);
-            if (match) {
-              countdownText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
-            }
-          }
-        } catch (e) {
-          console.log(`${getCurrentTimestamp()} 🔍 Intentando búsqueda alternativa del temporizador...`);
+      // Buscar elementos que contengan "hours" DENTRO del popup
+      const popupHandle = await page.$('div.dialog-flow-box');
+      if (popupHandle) {
+        const popupText = await page.evaluate(el => el.innerText, popupHandle);
+        const match = popupText.match(/(\d+)\s*hours?\s+(\d+)\s*min\s+(\d+)\s*sec/);
+        if (match) {
+          countdownText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
+          console.log(`${getCurrentTimestamp()} ⏳ Temporizador encontrado: ${countdownText}`);
         }
-
-        if (!countdownText) {
-          const allText = await page.evaluate(() => document.body.innerText);
-          const match = allText.match(/(\d+)\s*hours?\s+(\d+)\s*min\s+(\d+)\s*sec/);
-          if (match) {
-            countdownText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
-          }
-        }
-
-        if (countdownText) {
-          console.log(`${getCurrentTimestamp()} ⏳ Conteo regresivo encontrado (sin necesidad de confirmar): ${countdownText.trim()}`);
-          const timeObj = parseCountdownText(countdownText.trim());
-          const waitTimeMs = timeToMilliseconds(timeObj) + 20000;
-          const { dateStr: futureDateTimeDate, timeStr: futureDateTimeTime } = getFutureDateTime(waitTimeMs);
-          const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
-          console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${futureDateTimeDate} a las ${futureDateTimeTime} que son aproximadamente en ${minutes} minutos...`);
-          
-          try {
-            const closeButtonSelector = "body > div.dialog-flow-box > div > img.close-button";
-            await page.waitForSelector(closeButtonSelector, { timeout: 3000 });
-            await page.click(closeButtonSelector);
-            console.log(`${getCurrentTimestamp()} ❌ Ventana emergente cerrada automáticamente.`);
-          } catch (e) {
-            console.log(`${getCurrentTimestamp()} ℹ️ No se encontró ventana emergente para cerrar (esto es normal).`);
-          }
-          
-          setTimeout(runCycle, waitTimeMs);
-          return;
-        }
-      } catch (countdownError) {
-        console.log(`${getCurrentTimestamp()} ⚠️ No se encontró ni botón de confirmación ni conteo regresivo. Reintentando en 5 minutos...`);
-        setTimeout(runCycle, 300000);
-        return;
       }
+    } catch (e) {
+      console.log(`${getCurrentTimestamp()} ⚠️ Error al buscar temporizador: ${e.message}`);
     }
 
-    // === BALANCE DESPUÉS DE RECLAMAR ===
+    // CONTINÚA EN LA PARTE 2...
+    // Ahora buscar botón "Open Wish Box" SOLO dentro del popup
+    let prizeClaimAttempted = false;
+    
+    try {
+      console.log(`${getCurrentTimestamp()} 🔍 Buscando botón "Open Wish Box" dentro del popup...`);
+      
+      // Buscar SOLO dentro del popup usando page.evaluate
+      const buttonExists = await page.evaluate(() => {
+        const popup = document.querySelector('div.dialog-flow-box');
+        if (!popup) return false;
+        
+        const allElements = popup.querySelectorAll('*');
+        for (let el of allElements) {
+          if (el.textContent && el.textContent.includes('Open Wish Box')) {
+            return true;
+          }
+        }
+        return false;
+      });
+      
+      if (buttonExists) {
+        console.log(`${getCurrentTimestamp()} ✅ Botón "Open Wish Box" encontrado en el popup. Intentando reclamar...`);
+        
+        // Buscar y clickear el botón dentro del popup
+        const popupHandle = await page.$('div.dialog-flow-box');
+        const [confirmButton] = await page.$x("//div[@class='dialog-flow-box']//*[contains(text(), 'Open Wish Box')]");
+        
+        if (confirmButton) {
+          await confirmButton.click();
+          prizeClaimAttempted = true;
+          console.log(`${getCurrentTimestamp()} ✅ Clic en botón "Open Wish Box" exitoso`);
+          
+          // Esperar un momento para que aparezca el temporizador tras reclamar
+          console.log(`${getCurrentTimestamp()} ⏳ Esperando actualización del popup después de reclamar...`);
+          await page.waitForTimeout(3000);
+          
+          // Buscar el temporizador NUEVAMENTE en el mismo popup (sin cerrarlo)
+          const popupHandle2 = await page.$('div.dialog-flow-box');
+          if (popupHandle2) {
+            const popupText2 = await page.evaluate(el => el.innerText, popupHandle2);
+            const match2 = popupText2.match(/(\d+)\s*hours?\s+(\d+)\s*min\s+(\d+)\s*sec/);
+            if (match2) {
+              countdownText = `${match2[1]} hours ${match2[2]} min ${match2[3]} sec`;
+              console.log(`${getCurrentTimestamp()} ⏳ Temporizador actualizado después de reclamar: ${countdownText}`);
+            }
+          }
+        }
+      } else {
+        console.log(`${getCurrentTimestamp()} ℹ️ No se encontró botón "Open Wish Box". Ya está en cooldown.`);
+      }
+    } catch (buttonError) {
+      console.log(`${getCurrentTimestamp()} ℹ️ Error al buscar botón: ${buttonError.message}`);
+    }
+
+    // === VALIDAR QUE TENEMOS EL TEMPORIZADOR ===
+    if (!countdownText) {
+      console.log(`${getCurrentTimestamp()} ⚠️ No se pudo obtener el temporizador del popup.`);
+      
+      // Tomar screenshot para debugging
+      try {
+        await page.screenshot({ path: `/tmp/packetshare_error_${Date.now()}.png` });
+        console.log(`${getCurrentTimestamp()} 📸 Screenshot guardado para debugging`);
+      } catch {}
+      
+      // Incrementar contador de fallos
+      failedAttempts++;
+      const retryDelay = getRetryDelay(failedAttempts);
+      const retryText = getRetryDelayText(failedAttempts);
+      
+      console.log(`${getCurrentTimestamp()} 🔄 Intento fallido #${failedAttempts}. Reintentando en ${retryText}...`);
+      
+      // Cerrar popup si existe
+      try {
+        const closeButton = await page.$('div.dialog-flow-box img[alt="closeButton"]');
+        if (closeButton) await closeButton.click();
+      } catch {}
+      
+      setTimeout(runCycle, retryDelay);
+      return;
+    }
+
+    // === ÉXITO: Tenemos el temporizador ===
+    failedAttempts = 0; // Resetear contador de fallos
+    
+    const timeObj = parseCountdownText(countdownText.trim());
+    const waitTimeMs = timeToMilliseconds(timeObj) + 20000; // +20 segundos de margen
+    const { dateStr, timeStr } = getFutureDateTime(waitTimeMs);
+    const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
+    
+    console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${dateStr} a las ${timeStr} (~${minutes} minutos)`);
+
+    // === VERIFICAR BALANCE SI SE RECLAMÓ ===
     if (prizeClaimAttempted) {
-      console.log(`${getCurrentTimestamp()} 🔄 Refrescando página para obtener balance DESPUÉS de reclamar...`);
+      console.log(`${getCurrentTimestamp()} 🔄 Refrescando página para verificar balance...`);
+      
+      // Cerrar popup primero
+      try {
+        const closeButton = await page.$('div.dialog-flow-box img[alt="closeButton"]');
+        if (closeButton) {
+          await closeButton.click();
+          await page.waitForTimeout(1000);
+        }
+      } catch {}
+      
       await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
       await page.waitForTimeout(3000);
       
-      console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance DESPUÉS de intentar reclamar...`);
+      console.log(`${getCurrentTimestamp()} 🔍 Obteniendo balance DESPUÉS de reclamar...`);
       await page.waitForTimeout(2000);
       const balanceAfter = await page.$eval('div.money span', el => el.textContent);
       console.log(`${getCurrentTimestamp()} 💰 Balance después: ${balanceAfter}`);
@@ -281,121 +346,49 @@ async function runCycle() {
         console.log(`${getCurrentTimestamp()} 🎉 Éxito: El balance aumentó. Premio reclamado.`);
         await sendNotification("Premio reclamado con aumento de balance");
       } else {
-        console.log(`${getCurrentTimestamp()} ⚠️ Advertencia: El balance NO aumentó después de reclamar. Puede que el premio haya sido $0 o haya un retraso en la actualización.`);
+        console.log(`${getCurrentTimestamp()} ℹ️ El balance no aumentó. El premio pudo haber sido $0.`);
+      }
+    } else {
+      // Solo cerrar el popup si no se reclamó nada
+      try {
+        const closeButton = await page.$('div.dialog-flow-box img[alt="closeButton"]');
+        if (closeButton) {
+          await closeButton.click();
+          console.log(`${getCurrentTimestamp()} ❌ Popup cerrado.`);
+        }
+      } catch (e) {
+        console.log(`${getCurrentTimestamp()} ℹ️ No se pudo cerrar popup (puede haberse cerrado automáticamente).`);
       }
     }
 
-    // === VERIFICAR NUEVO CONTEO REGRESIVO ===
-    console.log(`${getCurrentTimestamp()} 🔍 Verificando nuevo conteo regresivo...`);
-    try {
-      console.log(`${getCurrentTimestamp()} 👆 Haciendo clic para verificar nuevo conteo regresivo...`);
-      
-      try {
-        // Buscar de nuevo por alt="gift" primero
-        await page.waitForXPath("//img[@alt='gift']", { timeout: 5000 });
-        const result = await page.$x("//img[@alt='gift']");
-        if (result.length > 0) {
-          await result[0].click();
-          console.log(`${getCurrentTimestamp()} ✅ Segundo clic en regalo exitoso`);
-        } else {
-          throw new Error("No se encontró la imagen del regalo para segundo clic");
-        }
-      } catch (e) {
-        // Fallback a búsqueda por src
-        try {
-          await page.waitForXPath("//img[contains(@src, 'img_receive') or contains(@src, 'img_full') or contains(@src, 'gift')]", { timeout: 5000 });
-          const [giftImg] = await page.$x("//img[contains(@src, 'img_receive') or contains(@src, 'img_full') or contains(@src, 'gift')]");
-          if (giftImg) {
-            await giftImg.click();
-            console.log(`${getCurrentTimestamp()} ✅ Segundo clic en regalo exitoso (por src)`);
-          } else {
-            throw new Error("No se encontró la imagen del regalo");
-          }
-        } catch (e2) {
-          throw new Error(`No se pudo hacer clic en el elemento del premio: ${e2.message}`);
-        }
-      }
-
-      await page.waitForTimeout(3000);
-      
-      console.log(`${getCurrentTimestamp()} 🔍 Buscando temporizador...`);
-      
-      let countdownText = null;
-      try {
-        const [timerElement] = await page.$x("//*[contains(text(), 'hours')]");
-        if (timerElement) {
-          const parentText = await page.evaluate(el => {
-            let text = '';
-            let parent = el.parentElement;
-            for (let child of parent.children) {
-              text += child.textContent + ' ';
-            }
-            return text;
-          }, timerElement);
-          
-          const match = parentText.match(/(\d+)\s*hours?\s+(\d+)\s*min\s+(\d+)\s*sec/);
-          if (match) {
-            countdownText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
-          }
-        }
-      } catch (e) {
-        console.log(`${getCurrentTimestamp()} 🔍 Intentando búsqueda alternativa del temporizador...`);
-      }
-      
-      if (!countdownText) {
-        const allText = await page.evaluate(() => document.body.innerText);
-        const match = allText.match(/(\d+)\s*hours?\s+(\d+)\s*min\s+(\d+)\s*sec/);
-        if (match) {
-          countdownText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
-        }
-      }
-      
-      if (countdownText) {
-        console.log(`${getCurrentTimestamp()} ⏱️ Nuevo conteo regresivo encontrado: ${countdownText.trim()}`);
-        
-        const timeObj = parseCountdownText(countdownText.trim());
-        const waitTimeMs = timeToMilliseconds(timeObj) + 20000;
-        
-        const { dateStr: futureDateTimeDate, timeStr: futureDateTimeTime } = getFutureDateTime(waitTimeMs);
-        const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
-        console.log(`${getCurrentTimestamp()} ⏰ Próximo intento el ${futureDateTimeDate} a las ${futureDateTimeTime} que son aproximadamente en ${minutes} minutos...`);
-        
-        try {
-          const closeButtonSelector = "body > div.dialog-flow-box > div > img.close-button";
-          await page.waitForSelector(closeButtonSelector, { timeout: 3000 });
-          await page.click(closeButtonSelector);
-          console.log(`${getCurrentTimestamp()} ❌ Ventana emergente cerrada automáticamente.`);
-        } catch (e) {
-          console.log(`${getCurrentTimestamp()} ℹ️ No se encontró ventana emergente para cerrar (esto es normal).`);
-        }
-        
-        setTimeout(runCycle, waitTimeMs);
-      } else {
-        console.log(`${getCurrentTimestamp()} ⚠️ No se pudo obtener el nuevo conteo regresivo. Reintentando en 5 minutos...`);
-        setTimeout(runCycle, 300000);
-      }
-      
-    } catch (countdownError) {
-      console.log(`${getCurrentTimestamp()} ⚠️ No se pudo obtener el nuevo conteo regresivo. Reintentando en 5 minutos...`);
-      setTimeout(runCycle, 300000);
-    }
+    // === ESPERAR Y REPETIR CICLO ===
+    setTimeout(runCycle, waitTimeMs);
 
   } catch (err) {
     console.error(`${getCurrentTimestamp()} ⚠️ Error en el ciclo:`, err.message);
     
-    if (browser) {
-      try {
-        await browser.close();
-      } catch (closeErr) {
-        console.error(`${getCurrentTimestamp()} ⚠️ Error al cerrar el navegador:`, closeErr.message);
+    // Incrementar contador de fallos
+    failedAttempts++;
+    const retryDelay = getRetryDelay(failedAttempts);
+    const retryText = getRetryDelayText(failedAttempts);
+    
+    console.log(`${getCurrentTimestamp()} 🔄 Intento fallido #${failedAttempts}. Reintentando en ${retryText}...`);
+    
+    // Intentar cerrar browser si hay error crítico
+    if (err.message.includes("Session closed") || err.message.includes("Target closed")) {
+      if (browser) {
+        try {
+          await browser.close();
+        } catch (closeErr) {
+          console.error(`${getCurrentTimestamp()} ⚠️ Error al cerrar el navegador:`, closeErr.message);
+        }
       }
+      
+      // Forzar relogin
+      isFirstRun = true;
     }
     
-    console.log(`${getCurrentTimestamp()} 🔄 Intentando reconectar en 60 segundos...`);
-    setTimeout(() => {
-      isFirstRun = true;
-      runCycle();
-    }, 60000);
+    setTimeout(runCycle, retryDelay);
   }
 }
 
@@ -419,4 +412,5 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
-// ---- FIN PackeshareBot v2.2R ----
+// ---- FIN PackeshareBot v2.3R ----
+
