@@ -1,4 +1,4 @@
-// bot.js -- PackeshareBot v2.3R (Fixed Loop + Progressive Retries) - PARTE 1/2
+// bot.js -- PackeshareBot v2.3.1R (Fixed Timer Detection) - PARTE 1/2
 const puppeteer = require("puppeteer");
 const http = require("http");
 
@@ -204,31 +204,51 @@ async function runCycle() {
     console.log(`${getCurrentTimestamp()} ⏳ Esperando apertura del popup...`);
     await page.waitForTimeout(3000);
 
-    // === VERIFICAR CONTENIDO DEL POPUP (DENTRO DEL POPUP SOLAMENTE) ===
+    // === VERIFICAR CONTENIDO DEL POPUP ===
     console.log(`${getCurrentTimestamp()} 🔍 Verificando contenido del popup...`);
     
-    // Primero buscar el temporizador (siempre debe estar)
+    // === BUSCAR TEMPORIZADOR (ESTRATEGIA ROBUSTA) ===
     let countdownText = null;
     
+    console.log(`${getCurrentTimestamp()} 🔍 Buscando temporizador en el popup...`);
+    
+    // ESTRATEGIA 1: Buscar div.time directamente y extraer spans
     try {
-      console.log(`${getCurrentTimestamp()} 🔍 Buscando temporizador en el popup...`);
-      
-      // Buscar elementos que contengan "hours" DENTRO del popup
-      const popupHandle = await page.$('div.dialog-flow-box');
-      if (popupHandle) {
-        const popupText = await page.evaluate(el => el.innerText, popupHandle);
-        const match = popupText.match(/(\d+)\s*hours?\s+(\d+)\s*min\s+(\d+)\s*sec/);
-        if (match) {
-          countdownText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
-          console.log(`${getCurrentTimestamp()} ⏳ Temporizador encontrado: ${countdownText}`);
+      const timeDiv = await page.$('div.dialog-flow-box div.time');
+      if (timeDiv) {
+        const spans = await timeDiv.$$('span');
+        if (spans.length >= 3) {
+          const hours = await (await spans[0].getProperty('textContent')).jsonValue();
+          const minutes = await (await spans[1].getProperty('textContent')).jsonValue();
+          const seconds = await (await spans[2].getProperty('textContent')).jsonValue();
+          countdownText = `${hours.trim()} hours ${minutes.trim()} min ${seconds.trim()} sec`;
+          console.log(`${getCurrentTimestamp()} ⏳ Temporizador encontrado (div.time): ${countdownText}`);
         }
       }
     } catch (e) {
-      console.log(`${getCurrentTimestamp()} ⚠️ Error al buscar temporizador: ${e.message}`);
+      console.log(`${getCurrentTimestamp()} ℹ️ No se encontró div.time, probando con regex...`);
+    }
+
+    // ESTRATEGIA 2: Si no funcionó, usar regex flexible sobre el texto del popup
+    if (!countdownText) {
+      try {
+        const popupHandle = await page.$('div.dialog-flow-box');
+        if (popupHandle) {
+          const popupText = await page.evaluate(el => el.innerText, popupHandle);
+          // Regex más flexible (permite múltiples espacios/saltos de línea)
+          const match = popupText.match(/(\d+)\s*hours?\s*(\d+)\s*min\s*(\d+)\s*sec/);
+          if (match) {
+            countdownText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
+            console.log(`${getCurrentTimestamp()} ⏳ Temporizador encontrado (regex): ${countdownText}`);
+          }
+        }
+      } catch (e) {
+        console.log(`${getCurrentTimestamp()} ⚠️ Error al buscar temporizador con regex: ${e.message}`);
+      }
     }
 
     // CONTINÚA EN LA PARTE 2...
-    // Ahora buscar botón "Open Wish Box" SOLO dentro del popup
+    // === BUSCAR BOTÓN "OPEN WISH BOX" SOLO DENTRO DEL POPUP ===
     let prizeClaimAttempted = false;
     
     try {
@@ -252,7 +272,6 @@ async function runCycle() {
         console.log(`${getCurrentTimestamp()} ✅ Botón "Open Wish Box" encontrado en el popup. Intentando reclamar...`);
         
         // Buscar y clickear el botón dentro del popup
-        const popupHandle = await page.$('div.dialog-flow-box');
         const [confirmButton] = await page.$x("//div[@class='dialog-flow-box']//*[contains(text(), 'Open Wish Box')]");
         
         if (confirmButton) {
@@ -265,14 +284,34 @@ async function runCycle() {
           await page.waitForTimeout(3000);
           
           // Buscar el temporizador NUEVAMENTE en el mismo popup (sin cerrarlo)
-          const popupHandle2 = await page.$('div.dialog-flow-box');
-          if (popupHandle2) {
-            const popupText2 = await page.evaluate(el => el.innerText, popupHandle2);
-            const match2 = popupText2.match(/(\d+)\s*hours?\s+(\d+)\s*min\s+(\d+)\s*sec/);
-            if (match2) {
-              countdownText = `${match2[1]} hours ${match2[2]} min ${match2[3]} sec`;
-              console.log(`${getCurrentTimestamp()} ⏳ Temporizador actualizado después de reclamar: ${countdownText}`);
+          // ESTRATEGIA 1: div.time
+          try {
+            const timeDiv2 = await page.$('div.dialog-flow-box div.time');
+            if (timeDiv2) {
+              const spans2 = await timeDiv2.$$('span');
+              if (spans2.length >= 3) {
+                const hours2 = await (await spans2[0].getProperty('textContent')).jsonValue();
+                const minutes2 = await (await spans2[1].getProperty('textContent')).jsonValue();
+                const seconds2 = await (await spans2[2].getProperty('textContent')).jsonValue();
+                countdownText = `${hours2.trim()} hours ${minutes2.trim()} min ${seconds2.trim()} sec`;
+                console.log(`${getCurrentTimestamp()} ⏳ Temporizador actualizado después de reclamar: ${countdownText}`);
+              }
             }
+          } catch {}
+          
+          // ESTRATEGIA 2: regex si div.time falló
+          if (!countdownText) {
+            try {
+              const popupHandle2 = await page.$('div.dialog-flow-box');
+              if (popupHandle2) {
+                const popupText2 = await page.evaluate(el => el.innerText, popupHandle2);
+                const match2 = popupText2.match(/(\d+)\s*hours?\s*(\d+)\s*min\s*(\d+)\s*sec/);
+                if (match2) {
+                  countdownText = `${match2[1]} hours ${match2[2]} min ${match2[3]} sec`;
+                  console.log(`${getCurrentTimestamp()} ⏳ Temporizador actualizado (regex): ${countdownText}`);
+                }
+              }
+            } catch {}
           }
         }
       } else {
@@ -285,12 +324,6 @@ async function runCycle() {
     // === VALIDAR QUE TENEMOS EL TEMPORIZADOR ===
     if (!countdownText) {
       console.log(`${getCurrentTimestamp()} ⚠️ No se pudo obtener el temporizador del popup.`);
-      
-      // Tomar screenshot para debugging
-      try {
-        await page.screenshot({ path: `/tmp/packetshare_error_${Date.now()}.png` });
-        console.log(`${getCurrentTimestamp()} 📸 Screenshot guardado para debugging`);
-      } catch {}
       
       // Incrementar contador de fallos
       failedAttempts++;
@@ -412,5 +445,4 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
-// ---- FIN PackeshareBot v2.3R ----
-
+// ---- FIN PackeshareBot v2.3.1R ----
