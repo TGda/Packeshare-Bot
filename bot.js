@@ -1,4 +1,4 @@
-// bot.js -- PackeshareBot v2.3.2R (Generic Timer Selectors) - PARTE 1/3
+// bot.js -- PackeshareBot v2.3.3R (Fixed Click + Timer Detection) - PARTE 1/3
 const puppeteer = require("puppeteer");
 const http = require("http");
 
@@ -165,103 +165,92 @@ async function runCycle() {
     await page.waitForTimeout(3000);
 
     // CONTINÚA EN PARTE 2...
-    // === BUSCAR TEMPORIZADOR (GENÉRICO) ===
+    // === BUSCAR Y CLICKEAR "OPEN WISH BOX" CON MÉTODO MEJORADO ===
+    console.log(`${getCurrentTimestamp()} 🔍 Buscando botón "Open Wish Box"...`);
+    let prizeClaimAttempted = false;
+
+    // Verificar si el botón existe en la página
+    const buttonExists = await page.evaluate(() => {
+      const allText = document.body.innerText;
+      return allText.includes('Open Wish Box');
+    });
+
+    if (buttonExists) {
+      console.log(`${getCurrentTimestamp()} ✅ Botón "Open Wish Box" encontrado`);
+      
+      // MÉTODO MEJORADO: Click con JavaScript directo
+      const buttonClicked = await page.evaluate(() => {
+        const allElements = document.querySelectorAll('*');
+        for (let el of allElements) {
+          if (el.textContent && el.textContent.trim().includes('Open Wish Box')) {
+            el.click();
+            return true;
+          }
+        }
+        return false;
+      });
+
+      if (buttonClicked) {
+        prizeClaimAttempted = true;
+        console.log(`${getCurrentTimestamp()} ✅ Clic en "Open Wish Box" exitoso (JS)`);
+        await page.waitForTimeout(3000);
+      } else {
+        console.log(`${getCurrentTimestamp()} ⚠️ No se pudo clickear "Open Wish Box"`);
+      }
+    } else {
+      console.log(`${getCurrentTimestamp()} ℹ️ No hay botón. Ya en cooldown.`);
+    }
+
+    // === BUSCAR TEMPORIZADOR ===
     console.log(`${getCurrentTimestamp()} 🔍 Buscando temporizador...`);
     let countdownText = null;
 
-    // MÉTODO 1: Buscar directamente regex en todo el body (más simple y directo)
+    // MÉTODO 1: Buscar "Next box available in" (después de reclamar)
     try {
       const bodyText = await page.evaluate(() => document.body.innerText);
-      const match = bodyText.match(/(\d+)\s*hours?\s*(\d+)\s*min\s*(\d+)\s*sec/i);
-      if (match) {
-        countdownText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
-        console.log(`${getCurrentTimestamp()} ⏳ Temporizador (método 1): ${countdownText}`);
+      
+      if (bodyText.includes('Next box available in')) {
+        console.log(`${getCurrentTimestamp()} 🔍 Detectado "Next box available in"`);
+        const match = bodyText.match(/(\d+)\s*hours?\s*(\d+)\s*min\s*(\d+)\s*sec/i);
+        if (match) {
+          countdownText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
+          console.log(`${getCurrentTimestamp()} ⏳ Temporizador (Next box): ${countdownText}`);
+        }
       }
     } catch (e) {
-      console.log(`${getCurrentTimestamp()} ℹ️ Método 1 falló`);
+      console.log(`${getCurrentTimestamp()} ℹ️ Método "Next box" falló`);
     }
 
-    // MÉTODO 2: Buscar div.time si el método 1 no funcionó
+    // MÉTODO 2: Buscar "Time left to collect" (cooldown sin reclamar)
     if (!countdownText) {
       try {
-        const timeDiv = await page.$('div.time');
-        if (timeDiv) {
-          const spans = await timeDiv.$$('span');
-          if (spans.length >= 3) {
-            const hours = await (await spans[0].getProperty('textContent')).jsonValue();
-            const minutes = await (await spans[1].getProperty('textContent')).jsonValue();
-            const seconds = await (await spans[2].getProperty('textContent')).jsonValue();
-            countdownText = `${hours.trim()} hours ${minutes.trim()} min ${seconds.trim()} sec`;
-            console.log(`${getCurrentTimestamp()} ⏳ Temporizador (método 2): ${countdownText}`);
-          }
-        }
-      } catch (e) {
-        console.log(`${getCurrentTimestamp()} ℹ️ Método 2 falló`);
-      }
-    }
-
-    // MÉTODO 3: XPath para buscar elementos con "hours"
-    if (!countdownText) {
-      try {
-        const [hoursEl] = await page.$x("//*[contains(text(), 'hours')]");
-        if (hoursEl) {
-          const parentText = await page.evaluate(el => {
-            let current = el;
-            for (let i = 0; i < 3; i++) {
-              if (current.parentElement) {
-                current = current.parentElement;
-                const text = current.innerText || current.textContent;
-                if (text && text.includes('hours') && text.includes('min') && text.includes('sec')) {
-                  return text;
-                }
-              }
-            }
-            return el.parentElement ? el.parentElement.innerText : el.innerText;
-          }, hoursEl);
-          
-          const match = parentText.match(/(\d+)\s*hours?\s*(\d+)\s*min\s*(\d+)\s*sec/i);
+        const bodyText = await page.evaluate(() => document.body.innerText);
+        
+        if (bodyText.includes('Time left to collect')) {
+          console.log(`${getCurrentTimestamp()} 🔍 Detectado "Time left to collect"`);
+          const match = bodyText.match(/(\d+)\s*hours?\s*(\d+)\s*min\s*(\d+)\s*sec/i);
           if (match) {
             countdownText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
-            console.log(`${getCurrentTimestamp()} ⏳ Temporizador (método 3): ${countdownText}`);
+            console.log(`${getCurrentTimestamp()} ⏳ Temporizador (Time left): ${countdownText}`);
           }
         }
       } catch (e) {
-        console.log(`${getCurrentTimestamp()} ℹ️ Método 3 falló`);
+        console.log(`${getCurrentTimestamp()} ℹ️ Método "Time left" falló`);
       }
     }
 
-    // === BUSCAR BOTÓN "OPEN WISH BOX" ===
-    let prizeClaimAttempted = false;
-    
-    try {
-      const buttonExists = await page.evaluate(() => {
-        const allText = document.body.innerText;
-        return allText.includes('Open Wish Box');
-      });
-      
-      if (buttonExists) {
-        console.log(`${getCurrentTimestamp()} ✅ Botón "Open Wish Box" encontrado`);
-        
-        const [confirmButton] = await page.$x("//*[contains(text(), 'Open Wish Box')]");
-        if (confirmButton) {
-          await confirmButton.click();
-          prizeClaimAttempted = true;
-          console.log(`${getCurrentTimestamp()} ✅ Clic en "Open Wish Box" exitoso`);
-          await page.waitForTimeout(3000);
-          
-          // Re-buscar temporizador después de reclamar
-          const bodyText2 = await page.evaluate(() => document.body.innerText);
-          const match2 = bodyText2.match(/(\d+)\s*hours?\s*(\d+)\s*min\s*(\d+)\s*sec/i);
-          if (match2) {
-            countdownText = `${match2[1]} hours ${match2[2]} min ${match2[3]} sec`;
-            console.log(`${getCurrentTimestamp()} ⏳ Temporizador actualizado: ${countdownText}`);
-          }
+    // MÉTODO 3: Regex genérico en todo el body (fallback)
+    if (!countdownText) {
+      try {
+        const bodyText = await page.evaluate(() => document.body.innerText);
+        const match = bodyText.match(/(\d+)\s*hours?\s*(\d+)\s*min\s*(\d+)\s*sec/i);
+        if (match) {
+          countdownText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
+          console.log(`${getCurrentTimestamp()} ⏳ Temporizador (genérico): ${countdownText}`);
         }
-      } else {
-        console.log(`${getCurrentTimestamp()} ℹ️ No hay botón. Ya en cooldown.`);
+      } catch (e) {
+        console.log(`${getCurrentTimestamp()} ℹ️ Método genérico falló`);
       }
-    } catch (e) {
-      console.log(`${getCurrentTimestamp()} ℹ️ Error buscando botón: ${e.message}`);
     }
 
     // === VALIDAR TEMPORIZADOR ===
@@ -272,9 +261,14 @@ async function runCycle() {
       const retryText = getRetryDelayText(failedAttempts);
       console.log(`${getCurrentTimestamp()} 🔄 Intento #${failedAttempts}. Reintento en ${retryText}...`);
       
+      // Cerrar popup si existe
       try {
-        const closeBtn = await page.$('img[alt="closeButton"]');
-        if (closeBtn) await closeBtn.click();
+        await page.evaluate(() => {
+          const closeBtn = Array.from(document.querySelectorAll('*')).find(el => 
+            el.alt === 'closeButton' || el.textContent === 'OK'
+          );
+          if (closeBtn) closeBtn.click();
+        });
       } catch {}
       
       setTimeout(runCycle, retryDelay);
@@ -291,9 +285,14 @@ async function runCycle() {
 
     // === VERIFICAR BALANCE SI RECLAMÓ ===
     if (prizeClaimAttempted) {
+      // Cerrar popup con "OK" o botón de cierre
       try {
-        const closeBtn = await page.$('img[alt="closeButton"]');
-        if (closeBtn) await closeBtn.click();
+        await page.evaluate(() => {
+          const okBtn = Array.from(document.querySelectorAll('*')).find(el => 
+            el.textContent && el.textContent.trim() === 'OK'
+          );
+          if (okBtn) okBtn.click();
+        });
         await page.waitForTimeout(1000);
       } catch {}
       
@@ -310,9 +309,14 @@ async function runCycle() {
         console.log(`${getCurrentTimestamp()} ℹ️ Balance sin cambios`);
       }
     } else {
+      // Cerrar popup sin reclamar
       try {
-        const closeBtn = await page.$('img[alt="closeButton"]');
-        if (closeBtn) await closeBtn.click();
+        await page.evaluate(() => {
+          const closeBtn = Array.from(document.querySelectorAll('*')).find(el => 
+            el.alt === 'closeButton'
+          );
+          if (closeBtn) closeBtn.click();
+        });
       } catch {}
     }
 
@@ -337,6 +341,8 @@ async function runCycle() {
 }
 
 // CONTINÚA EN PARTE 3...
+
+
 // Iniciar el primer ciclo
 runCycle();
 
@@ -357,4 +363,4 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
-// ---- FIN PackeshareBot v2.3.2R ----
+// ---- FIN PackeshareBot v2.3.3R ----
