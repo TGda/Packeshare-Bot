@@ -1,4 +1,4 @@
-// bot.js -- PackeshareBot v2.3.3R (Fixed Click + Timer Detection) - PARTE 1/3
+// bot.js -- PackeshareBot v2.3.4R (Fixed Click + Timer Detection) - PARTE 1/3
 const puppeteer = require("puppeteer");
 const http = require("http");
 
@@ -194,6 +194,35 @@ async function runCycle() {
         prizeClaimAttempted = true;
         console.log(`${getCurrentTimestamp()} ✅ Clic en "Open Wish Box" exitoso (JS)`);
         await page.waitForTimeout(3000);
+        
+      // === CERRAR POPUP "CONGRATULATIONS" CON BOTÓN "OK" ===
+      console.log(`${getCurrentTimestamp()} 🔍 Buscando botón "OK" del popup...`);
+      try {
+        // Esperar a que aparezca el popup de congratulaciones
+        await page.waitForTimeout(2000);
+        
+        // Buscar y hacer clic en el botón "OK"
+        const okButtonClicked = await page.evaluate(() => {
+          const allElements = document.querySelectorAll('*');
+          for (let el of allElements) {
+            if (el.textContent && el.textContent.trim() === 'OK' && 
+                el.tagName !== 'BODY' && el.tagName !== 'HTML') {
+              el.click();
+              return true;
+            }
+          }
+          return false;
+        });
+        
+        if (okButtonClicked) {
+          console.log(`${getCurrentTimestamp()} ✅ Clic en "OK" exitoso`);
+          await page.waitForTimeout(2000); // Esperar a que se cierre el popup
+        } else {
+          console.log(`${getCurrentTimestamp()} ⚠️ No se encontró el botón "OK"`);
+        }
+      } catch (e) {
+        console.log(`${getCurrentTimestamp()} ℹ️ Error al buscar "OK": ${e.message}`);
+      }
       } else {
         console.log(`${getCurrentTimestamp()} ⚠️ No se pudo clickear "Open Wish Box"`);
       }
@@ -363,4 +392,4 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
-// ---- FIN PackeshareBot v2.3.3R ----
+// ---- FIN PackeshareBot v2.3.4R ----
