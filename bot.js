@@ -1,4 +1,4 @@
-// bot.js -- PackeshareBot v2.3.4R (Fixed Click + Timer Detection) - PARTE 1/3
+// bot.js -- PackeshareBot v3.0.0 (Fixed Logic - Consistent with Honeygain) - PARTE 1/2
 const puppeteer = require("puppeteer");
 const http = require("http");
 
@@ -68,6 +68,7 @@ function getRetryDelayText(attempts) {
 async function sendNotification(message) {
   const notificationUrl = process.env.NOTIFICATION;
   if (!notificationUrl) return;
+
   return new Promise((resolve) => {
     const postData = '';
     let url;
@@ -77,8 +78,10 @@ async function sendNotification(message) {
       resolve();
       return;
     }
+
     const isHttps = url.protocol === 'https:';
     const httpModule = isHttps ? require('https') : require('http');
+
     const options = {
       hostname: url.hostname,
       port: url.port || (isHttps ? 443 : 80),
@@ -86,6 +89,7 @@ async function sendNotification(message) {
       method: 'POST',
       headers: { 'Content-Length': 0 }
     };
+
     const req = httpModule.request(options, () => resolve());
     req.on('error', () => resolve());
     req.end();
@@ -102,25 +106,34 @@ async function runCycle() {
         headless: "new",
         args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
       });
+
       page = await browser.newPage();
       console.log(`${getCurrentTimestamp()} 🌐 Abriendo página de login...`);
+      
       const response = await page.goto("https://www.packetshare.io/login/", {
         waitUntil: "networkidle2", timeout: 30000,
       });
-      console.log(`${getCurrentTimestamp()}    Estado de carga: ${response.status()}`);
+      
+      console.log(`${getCurrentTimestamp()} Estado de carga: ${response.status()}`);
+
       await page.waitForSelector('input[placeholder="Please enter the email"]', { timeout: 10000 });
       await page.waitForSelector('input[placeholder="Please enter password"]', { timeout: 10000 });
       await page.waitForSelector("div.btn.login", { timeout: 10000 });
+
       await page.type('input[placeholder="Please enter the email"]', process.env.EMAIL, { delay: 50 });
       await page.type('input[placeholder="Please enter password"]', process.env.PASSWORD, { delay: 50 });
+
       console.log(`${getCurrentTimestamp()} 🔑 Enviando login...`);
       await page.click("div.btn.login");
       await page.waitForTimeout(5000);
+
       const currentUrl = page.url();
       console.log(`${getCurrentTimestamp()} 📍 URL: ${currentUrl}`);
+
       if (!currentUrl.includes("/dashboard")) {
         throw new Error("No se pudo acceder al dashboard");
       }
+
       console.log(`${getCurrentTimestamp()} ✅ Login exitoso`);
       isFirstRun = false;
     } else {
@@ -129,224 +142,239 @@ async function runCycle() {
       await page.waitForTimeout(3000);
     }
 
-    // === BALANCE ===
+    // === BALANCE ANTES ===
     await page.waitForTimeout(2000);
-    const balanceBefore = await page.$eval('div.money span', el => el.textContent);
-    console.log(`${getCurrentTimestamp()} 💰 Balance: ${balanceBefore}`);
-
-    // === BUSCAR REGALO ===
-    console.log(`${getCurrentTimestamp()} 👆 Buscando regalo...`);
-    let giftImg = null;
-
-    try {
-      await page.waitForXPath("//img[@alt='gift']", { timeout: 5000 });
-      const result = await page.$x("//img[@alt='gift']");
-      if (result.length > 0) {
-        giftImg = result[0];
-        console.log(`${getCurrentTimestamp()} ✅ Encontrado por alt='gift'`);
-      }
-    } catch {
-      try {
-        await page.waitForXPath("//img[contains(@src, 'gift')]", { timeout: 5000 });
-        const result = await page.$x("//img[contains(@src, 'gift')]");
-        if (result.length > 0) {
-          giftImg = result[0];
-          console.log(`${getCurrentTimestamp()} ✅ Encontrado por src`);
+    
+    const balanceBefore = await page.evaluate(() => {
+      const balanceElements = Array.from(document.querySelectorAll('*')).filter(el => 
+        el.textContent && el.textContent.includes('Your balance')
+      );
+      
+      if (balanceElements.length > 0) {
+        const parent = balanceElements[0].closest('div');
+        if (parent) {
+          const balanceText = parent.textContent;
+          const match = balanceText.match(/([\d,]+\.\d+)/);
+          if (match) return match[1];
         }
-      } catch {
-        throw new Error("No se encontró imagen del regalo");
       }
+      
+      return '0';
+    });
+    
+    console.log(`${getCurrentTimestamp()} 💰 Balance actual: ${balanceBefore}`);
+
+    // === BUSCAR ICONO DEL REGALO ===
+    console.log(`${getCurrentTimestamp()} 🎁 Buscando icono del regalo...`);
+    
+    let giftIcon = null;
+    try {
+      await page.waitForTimeout(2000);
+      
+      giftIcon = await page.$('img[alt="flowFullNoReceive"]') || 
+                 await page.$('img[alt="flowFullReceived"]') ||
+                 await page.$('img[class*="box-full"]') ||
+                 await page.$('img[src*="flow"]');
+      
+      if (!giftIcon) {
+        throw new Error("No se encontró el icono del regalo");
+      }
+      
+      console.log(`${getCurrentTimestamp()} ✅ Icono del regalo encontrado`);
+    } catch (err) {
+      throw new Error("No se encontró el icono del regalo en la página");
     }
 
-    if (!giftImg) throw new Error("No se encontró la imagen del regalo");
+    // === CLICK EN EL REGALO ===
+    await giftIcon.click();
+    console.log(`${getCurrentTimestamp()} 👆 Clic en regalo exitoso`);
+    await page.waitForTimeout(4000);
+
+    // === VERIFICAR PROGRESO Y ESTADO ===
+    console.log(`${getCurrentTimestamp()} 🔍 Verificando progreso...`);
     
-    await giftImg.click();
-    console.log(`${getCurrentTimestamp()} ✅ Clic en regalo exitoso`);
-    await page.waitForTimeout(3000);
-
-    // CONTINÚA EN PARTE 2...
-    // === BUSCAR Y CLICKEAR "OPEN WISH BOX" CON MÉTODO MEJORADO ===
-    console.log(`${getCurrentTimestamp()} 🔍 Buscando botón "Open Wish Box"...`);
-    let prizeClaimAttempted = false;
-
-    // Verificar si el botón existe en la página
-    const buttonExists = await page.evaluate(() => {
-      const allText = document.body.innerText;
-      return allText.includes('Open Wish Box');
+    const popupInfo = await page.evaluate(() => {
+      const bodyText = document.body.innerText;
+      
+      const progressMatch = bodyText.match(/(\d+)%/);
+      const progress = progressMatch ? parseInt(progressMatch[1], 10) : 0;
+      
+      const hasOpenButton = bodyText.includes('Open Wish Box');
+      
+      let timerText = null;
+      let timerType = null;
+      
+      if (bodyText.includes('Time left to collect')) {
+        const match = bodyText.match(/(\d+)\s*hours?\s*(\d+)\s*min\s*(\d+)\s*sec/i);
+        if (match) {
+          timerText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
+          timerType = 'collecting';
+        }
+      }
+      
+      if (!timerText && bodyText.includes('Next box available in')) {
+        const match = bodyText.match(/(\d+)\s*hours?\s*(\d+)\s*min\s*(\d+)\s*sec/i);
+        if (match) {
+          timerText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
+          timerType = 'cooldown';
+        }
+      }
+      
+      if (!timerText) {
+        const match = bodyText.match(/(\d+)\s*hours?\s*(\d+)\s*min\s*(\d+)\s*sec/i);
+        if (match) {
+          timerText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
+          timerType = 'generic';
+        }
+      }
+      
+      const hasCongratulations = bodyText.includes('Congratulations');
+      const hasError = bodyText.includes('Request Failed') || bodyText.includes('failed');
+      
+      return { 
+        progress, 
+        hasOpenButton, 
+        timerText, 
+        timerType,
+        hasError,
+        hasCongratulations
+      };
     });
 
-    if (buttonExists) {
-      console.log(`${getCurrentTimestamp()} ✅ Botón "Open Wish Box" encontrado`);
+    console.log(`${getCurrentTimestamp()} 📊 Progreso: ${popupInfo.progress}%`);
+    if (popupInfo.timerType) {
+      console.log(`${getCurrentTimestamp()} ⏱️ Tipo de temporizador: ${popupInfo.timerType}`);
+    }
+
+    let prizeClaimAttempted = false;
+    let claimWasSuccessful = false;
+
+    // === LÓGICA DE DECISIÓN ===
+    if (popupInfo.hasCongratulations) {
+      // CASO ESPECIAL: Ya muestra Congratulations (recién reclamado)
+      console.log(`${getCurrentTimestamp()} 🎊 ¡Ya reclamado! Popup de Congratulations visible`);
+      claimWasSuccessful = true;
+      prizeClaimAttempted = true;
       
-      // MÉTODO MEJORADO: Click con JavaScript directo
-      const buttonClicked = await page.evaluate(() => {
+    } else if (popupInfo.progress === 100 && popupInfo.hasOpenButton && !popupInfo.timerText) {
+      // CASO 1: Listo para reclamar
+      console.log(`${getCurrentTimestamp()} 🎉 ¡Progreso al 100%! Intentando reclamar...`);
+      
+      const claimResult = await page.evaluate(() => {
         const allElements = document.querySelectorAll('*');
         for (let el of allElements) {
-          if (el.textContent && el.textContent.trim().includes('Open Wish Box')) {
+          const text = el.textContent ? el.textContent.trim() : '';
+          if (text === 'Open Wish Box' && el.tagName !== 'BODY' && el.tagName !== 'HTML') {
             el.click();
-            return true;
+            return { clicked: true, element: el.tagName };
           }
         }
-        return false;
+        return { clicked: false };
       });
 
-      if (buttonClicked) {
+      if (claimResult.clicked) {
+        console.log(`${getCurrentTimestamp()} ✅ Clic en "Open Wish Box" exitoso (elemento: ${claimResult.element || 'unknown'})`);
         prizeClaimAttempted = true;
-        console.log(`${getCurrentTimestamp()} ✅ Clic en "Open Wish Box" exitoso (JS)`);
-        await page.waitForTimeout(3000);
         
-      // === CERRAR POPUP "CONGRATULATIONS" CON BOTÓN "OK" ===
-      console.log(`${getCurrentTimestamp()} 🔍 Buscando botón "OK" del popup...`);
-      try {
-        // Esperar a que aparezca el popup de congratulaciones
-        await page.waitForTimeout(2000);
-        
-        // Buscar y hacer clic en el botón "OK"
-        const okButtonClicked = await page.evaluate(() => {
-          const allElements = document.querySelectorAll('*');
-          for (let el of allElements) {
-            if (el.textContent && el.textContent.trim() === 'OK' && 
-                el.tagName !== 'BODY' && el.tagName !== 'HTML') {
-              el.click();
-              return true;
-            }
-          }
-          return false;
+        await page.waitForTimeout(6000);
+
+        const afterClickInfo = await page.evaluate(() => {
+          const bodyText = document.body.innerText;
+          const hasError = bodyText.includes('Request Failed') || bodyText.includes('failed');
+          const hasCongratulations = bodyText.includes('Congratulations');
+          
+          return { hasError, hasCongratulations };
         });
-        
-        if (okButtonClicked) {
-          console.log(`${getCurrentTimestamp()} ✅ Clic en "OK" exitoso`);
-          await page.waitForTimeout(2000); // Esperar a que se cierre el popup
+
+        if (afterClickInfo.hasError) {
+          console.log(`${getCurrentTimestamp()} ⚠️ Error: Request Failed`);
+          claimWasSuccessful = false;
+        } else if (afterClickInfo.hasCongratulations) {
+          console.log(`${getCurrentTimestamp()} 🎊 ¡Reclamo exitoso!`);
+          claimWasSuccessful = true;
         } else {
-          console.log(`${getCurrentTimestamp()} ⚠️ No se encontró el botón "OK"`);
+          console.log(`${getCurrentTimestamp()} ℹ️ Respuesta ambigua, verificando balance...`);
+          claimWasSuccessful = false;
         }
-      } catch (e) {
-        console.log(`${getCurrentTimestamp()} ℹ️ Error al buscar "OK": ${e.message}`);
-      }
       } else {
         console.log(`${getCurrentTimestamp()} ⚠️ No se pudo clickear "Open Wish Box"`);
       }
-    } else {
-      console.log(`${getCurrentTimestamp()} ℹ️ No hay botón. Ya en cooldown.`);
-    }
 
-    // === BUSCAR TEMPORIZADOR ===
-    console.log(`${getCurrentTimestamp()} 🔍 Buscando temporizador...`);
-    let countdownText = null;
-
-    // MÉTODO 1: Buscar "Next box available in" (después de reclamar)
-    try {
-      const bodyText = await page.evaluate(() => document.body.innerText);
+    } else if (popupInfo.progress === 100 && popupInfo.timerText) {
+      // CASO 2: Ya reclamado, en cooldown
+      console.log(`${getCurrentTimestamp()} ⏳ Progreso al 100% pero en cooldown. Ya fue reclamado.`);
       
-      if (bodyText.includes('Next box available in')) {
-        console.log(`${getCurrentTimestamp()} 🔍 Detectado "Next box available in"`);
-        const match = bodyText.match(/(\d+)\s*hours?\s*(\d+)\s*min\s*(\d+)\s*sec/i);
-        if (match) {
-          countdownText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
-          console.log(`${getCurrentTimestamp()} ⏳ Temporizador (Next box): ${countdownText}`);
-        }
-      }
-    } catch (e) {
-      console.log(`${getCurrentTimestamp()} ℹ️ Método "Next box" falló`);
+    } else if (popupInfo.progress < 100) {
+      // CASO 3: Aún recolectando tráfico
+      console.log(`${getCurrentTimestamp()} 📈 Progreso ${popupInfo.progress}%. Esperando alcanzar 100%...`);
     }
 
-    // MÉTODO 2: Buscar "Time left to collect" (cooldown sin reclamar)
-    if (!countdownText) {
-      try {
-        const bodyText = await page.evaluate(() => document.body.innerText);
-        
-        if (bodyText.includes('Time left to collect')) {
-          console.log(`${getCurrentTimestamp()} 🔍 Detectado "Time left to collect"`);
-          const match = bodyText.match(/(\d+)\s*hours?\s*(\d+)\s*min\s*(\d+)\s*sec/i);
-          if (match) {
-            countdownText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
-            console.log(`${getCurrentTimestamp()} ⏳ Temporizador (Time left): ${countdownText}`);
-          }
-        }
-      } catch (e) {
-        console.log(`${getCurrentTimestamp()} ℹ️ Método "Time left" falló`);
-      }
-    }
+    // === CERRAR POPUP ===
+    await page.evaluate(() => {
+      const closeBtn = Array.from(document.querySelectorAll('*')).find(el => 
+        el.alt === 'closeButton' || el.getAttribute('alt') === 'closeButton'
+      );
+      if (closeBtn) closeBtn.click();
+    });
+    await page.waitForTimeout(2000);
 
-    // MÉTODO 3: Regex genérico en todo el body (fallback)
-    if (!countdownText) {
-      try {
-        const bodyText = await page.evaluate(() => document.body.innerText);
-        const match = bodyText.match(/(\d+)\s*hours?\s*(\d+)\s*min\s*(\d+)\s*sec/i);
-        if (match) {
-          countdownText = `${match[1]} hours ${match[2]} min ${match[3]} sec`;
-          console.log(`${getCurrentTimestamp()} ⏳ Temporizador (genérico): ${countdownText}`);
-        }
-      } catch (e) {
-        console.log(`${getCurrentTimestamp()} ℹ️ Método genérico falló`);
-      }
-    }
-
-    // === VALIDAR TEMPORIZADOR ===
-    if (!countdownText) {
+    // === BUSCAR TEMPORIZADOR PARA PRÓXIMO INTENTO ===
+    if (!popupInfo.timerText) {
       console.log(`${getCurrentTimestamp()} ⚠️ No se pudo obtener temporizador`);
       failedAttempts++;
       const retryDelay = getRetryDelay(failedAttempts);
       const retryText = getRetryDelayText(failedAttempts);
       console.log(`${getCurrentTimestamp()} 🔄 Intento #${failedAttempts}. Reintento en ${retryText}...`);
-      
-      // Cerrar popup si existe
-      try {
-        await page.evaluate(() => {
-          const closeBtn = Array.from(document.querySelectorAll('*')).find(el => 
-            el.alt === 'closeButton' || el.textContent === 'OK'
-          );
-          if (closeBtn) closeBtn.click();
-        });
-      } catch {}
-      
+
       setTimeout(runCycle, retryDelay);
       return;
     }
 
     // === ÉXITO: TEMPORIZADOR ENCONTRADO ===
     failedAttempts = 0;
-    const timeObj = parseCountdownText(countdownText.trim());
-    const waitTimeMs = timeToMilliseconds(timeObj) + 20000;
+    const timeObj = parseCountdownText(popupInfo.timerText.trim());
+    const waitTimeMs = timeToMilliseconds(timeObj) + 30000; // +30 segundos de margen
     const { dateStr, timeStr } = getFutureDateTime(waitTimeMs);
     const minutes = (waitTimeMs / 1000 / 60).toFixed(2);
+
     console.log(`${getCurrentTimestamp()} ⏰ Próximo intento: ${dateStr} ${timeStr} (~${minutes} min)`);
 
     // === VERIFICAR BALANCE SI RECLAMÓ ===
-    if (prizeClaimAttempted) {
-      // Cerrar popup con "OK" o botón de cierre
-      try {
-        await page.evaluate(() => {
-          const okBtn = Array.from(document.querySelectorAll('*')).find(el => 
-            el.textContent && el.textContent.trim() === 'OK'
-          );
-          if (okBtn) okBtn.click();
-        });
-        await page.waitForTimeout(1000);
-      } catch {}
+    if (prizeClaimAttempted || claimWasSuccessful) {
+      console.log(`${getCurrentTimestamp()} 🔍 Verificando cambio en balance...`);
       
       await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
       await page.waitForTimeout(3000);
-      const balanceAfter = await page.$eval('div.money span', el => el.textContent);
+
+      const balanceAfter = await page.evaluate(() => {
+        const balanceElements = Array.from(document.querySelectorAll('*')).filter(el => 
+          el.textContent && el.textContent.includes('Your balance')
+        );
+        
+        if (balanceElements.length > 0) {
+          const parent = balanceElements[0].closest('div');
+          if (parent) {
+            const balanceText = parent.textContent;
+            const match = balanceText.match(/([\d,]+\.\d+)/);
+            if (match) return match[1];
+          }
+        }
+        
+        return '0';
+      });
+
       console.log(`${getCurrentTimestamp()} 💰 Balance después: ${balanceAfter}`);
+
+      const balanceBeforeNum = parseFloat(balanceBefore.replace(/,/g, ''));
+      const balanceAfterNum = parseFloat(balanceAfter.replace(/,/g, ''));
       
-      const increased = parseFloat(balanceAfter.replace(/,/g, '')) > parseFloat(balanceBefore.replace(/,/g, ''));
-      if (increased) {
-        console.log(`${getCurrentTimestamp()} 🎉 Balance aumentó!`);
-        await sendNotification("Premio reclamado");
+      if (balanceAfterNum > balanceBeforeNum) {
+        const diff = (balanceAfterNum - balanceBeforeNum).toFixed(2);
+        console.log(`${getCurrentTimestamp()} 🎉 ¡Balance aumentó! +${diff} puntos`);
+        await sendNotification(`Premio reclamado: +${diff} puntos. Nuevo balance: ${balanceAfter}`);
       } else {
         console.log(`${getCurrentTimestamp()} ℹ️ Balance sin cambios`);
       }
-    } else {
-      // Cerrar popup sin reclamar
-      try {
-        await page.evaluate(() => {
-          const closeBtn = Array.from(document.querySelectorAll('*')).find(el => 
-            el.alt === 'closeButton'
-          );
-          if (closeBtn) closeBtn.click();
-        });
-      } catch {}
     }
 
     setTimeout(runCycle, waitTimeMs);
@@ -369,9 +397,6 @@ async function runCycle() {
   }
 }
 
-// CONTINÚA EN PARTE 3...
-
-
 // Iniciar el primer ciclo
 runCycle();
 
@@ -392,4 +417,4 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
-// ---- FIN PackeshareBot v2.3.4R ----
+// ---- FIN PackeshareBot v3.0.0 - CÓDIGO COMPLETO ENTREGADO ----
