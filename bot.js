@@ -386,7 +386,7 @@ async function runOnce(label = "ejecución") {
       // Verificar balance después solo si se intentó reclamar o el popup decía Congratulations
       if (claimAttempted) {
         console.log(
-          `${getCurrentTimestamp()} 🔍 Verificando balance tras intento de reclamo...
+          `${getCurrentTimestamp()} 🔍 Verificando balance tras intento de reclamo...`
         );
 
         await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
