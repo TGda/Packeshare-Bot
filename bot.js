@@ -1,4 +1,4 @@
-// bot.js -- PackeshareBot v4.0.0 (One-shot diario 00:05, sin reintentos, cierre de navegador)
+// bot.js -- PacketshareBot v4.1.0 (Con espera de 30s para gauge + click en modal)
 const puppeteer = require("puppeteer");
 const http = require("http");
 
@@ -70,7 +70,6 @@ async function sendNotification(message) {
     req.end();
   });
 }
-
 // == LÓGICA PRINCIPAL DE UN CICLO ==
 async function runOnce(label = "ejecución") {
   let browser;
@@ -147,9 +146,11 @@ async function runOnce(label = "ejecución") {
 
     console.log(`${getCurrentTimestamp()} ✅ Login exitoso`);
 
-    // === LEER BALANCE Y TEMPORIZADOR DE LA PÁGINA PRINCIPAL ===
-    await page.waitForTimeout(2000);
+    // === ESPERA DE 30 SEGUNDOS PARA QUE EL GAUGE CARGUE ===
+    console.log(`${getCurrentTimestamp()} ⏳ Esperando 30 segundos para que el gauge cargue...`);
+    await page.waitForTimeout(30000);
 
+    // === LEER BALANCE Y TEMPORIZADOR DE LA PÁGINA PRINCIPAL ===
     const mainPageInfo = await page.evaluate(() => {
       const bodyText = document.body.innerText;
 
@@ -225,7 +226,7 @@ async function runOnce(label = "ejecución") {
       console.log(`${getCurrentTimestamp()} ✅ Icono del regalo encontrado`);
       await giftIcon.click();
       console.log(`${getCurrentTimestamp()} 👆 Clic en regalo exitoso`);
-      await page.waitForTimeout(4000);
+      await page.waitForTimeout(5000); // Esperar que abra el popup
 
       console.log(
         `${getCurrentTimestamp()} 🔍 Leyendo progreso en popup para decidir si reclamar...`
@@ -273,6 +274,7 @@ async function runOnce(label = "ejecución") {
           `${getCurrentTimestamp()} 🎉 Progreso 100% y botón habilitado. Intentando reclamar...`
         );
 
+        // PRIMER CLICK en "Open Wish Box" (en la página/popup inicial)
         const claimResult = await page.evaluate(() => {
           const allElements = document.querySelectorAll("*");
           for (let el of allElements) {
@@ -295,8 +297,41 @@ async function runOnce(label = "ejecución") {
           console.log(
             `${getCurrentTimestamp()} ✅ Click en "Open Wish Box" exitoso (${claimResult.method})`
           );
-          await page.waitForTimeout(6000);
+          await page.waitForTimeout(3000); // Esperar que aparezca el modal
 
+          // SEGUNDO CLICK en el botón del modal
+          console.log(
+            `${getCurrentTimestamp()} 🔄 Buscando botón "Open Wish Box" en modal...`
+          );
+          
+          const modalClick = await page.evaluate(() => {
+            const allElements = document.querySelectorAll("*");
+            for (let el of allElements) {
+              const text = el.textContent ? el.textContent.trim() : "";
+              if (
+                text === "Open Wish Box" &&
+                (el.tagName === "BUTTON" || el.tagName === "DIV")
+              ) {
+                el.click();
+                return { clicked: true, tag: el.tagName };
+              }
+            }
+            return { clicked: false };
+          });
+
+          if (modalClick.clicked) {
+            console.log(
+              `${getCurrentTimestamp()} ✅ Click en botón del modal exitoso (${modalClick.tag})`
+            );
+            await page.waitForTimeout(6000); // Esperar confirmación
+          } else {
+            console.log(
+              `${getCurrentTimestamp()} ⚠️ No se encontró botón en el modal, continuando...`
+            );
+            await page.waitForTimeout(4000);
+          }
+
+          // Verificar resultado tras los clicks
           const afterClickInfo = await page.evaluate(() => {
             const bodyText = document.body.innerText;
             const hasError =
@@ -351,7 +386,7 @@ async function runOnce(label = "ejecución") {
       // Verificar balance después solo si se intentó reclamar o el popup decía Congratulations
       if (claimAttempted) {
         console.log(
-          `${getCurrentTimestamp()} 🔍 Verificando balance tras intento de reclamo...`
+          `${getCurrentTimestamp()} 🔍 Verificando balance tras intento de reclamo...
         );
 
         await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
