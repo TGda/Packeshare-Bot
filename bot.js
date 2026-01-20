@@ -1,4 +1,4 @@
-// bot.js -- PacketshareBot v4.1.0 (Con espera de 30s para gauge + click en modal)
+// bot.js -- PacketshareBot v4.2.0 (CORREGIDO: Sin click en icono, solo verifica balance)
 const puppeteer = require("puppeteer");
 const http = require("http");
 
@@ -70,6 +70,7 @@ async function sendNotification(message) {
     req.end();
   });
 }
+
 // == LÓGICA PRINCIPAL DE UN CICLO ==
 async function runOnce(label = "ejecución") {
   let browser;
@@ -198,84 +199,56 @@ async function runOnce(label = "ejecución") {
       console.log(
         `${getCurrentTimestamp()} ⏱️ Temporizador en dashboard (${mainPageInfo.timerType}): ${mainPageInfo.timerText}`
       );
-      // Hay temporizador => todavía no está listo; NO reclamamos
       summary.status = "OK_NO_CLAIM_TIMER";
       summary.progress = null;
       console.log(
         `${getCurrentTimestamp()} ℹ️ Temporizador activo. No se intenta reclamar en esta ejecución.`
       );
     } else {
-      // === SIN TEMPORIZADOR => BUSCAR ICONO DEL REGALO Y VER PROGRESO ===
+      // === SIN TEMPORIZADOR => BUSCAR BOTÓN "Open Wish Box" DIRECTAMENTE ===
       console.log(
-        `${getCurrentTimestamp()} 🎁 No hay temporizador en dashboard. Buscando icono del regalo...`
+        `${getCurrentTimestamp()} 🎁 No hay temporizador en dashboard. Buscando botón "Open Wish Box"...`
       );
 
-      let giftIcon = null;
       await page.waitForTimeout(2000);
 
-      giftIcon =
-        (await page.$('img[alt="flowFullNoReceive"]')) ||
-        (await page.$('img[alt="flowFullReceived"]')) ||
-        (await page.$('img[class*="box-full"]')) ||
-        (await page.$('img[src*="flow"]'));
-
-      if (!giftIcon) {
-        throw new Error("No se encontró el icono del regalo en la página");
-      }
-
-      console.log(`${getCurrentTimestamp()} ✅ Icono del regalo encontrado`);
-      await giftIcon.click();
-      console.log(`${getCurrentTimestamp()} 👆 Clic en regalo exitoso`);
-      await page.waitForTimeout(5000); // Esperar que abra el popup
-
-      console.log(
-        `${getCurrentTimestamp()} 🔍 Leyendo progreso en popup para decidir si reclamar...`
-      );
-
-      const popupInfo = await page.evaluate(() => {
+      // Leer progreso directamente del dashboard (sin hacer click en icono)
+      const dashboardInfo = await page.evaluate(() => {
         const bodyText = document.body.innerText;
 
         const progressMatch = bodyText.match(/(\d+)%/);
         const progress = progressMatch ? parseInt(progressMatch[1], 10) : 0;
 
         const hasOpenButton = bodyText.includes("Open Wish Box");
-        const hasCongratulations = bodyText.includes("Congratulations");
         const hasError =
           bodyText.includes("Request Failed") || bodyText.includes("failed");
 
         return {
           progress,
           hasOpenButton,
-          hasCongratulations,
           hasError,
         };
       });
 
-      summary.progress = popupInfo.progress;
+      summary.progress = dashboardInfo.progress;
       console.log(
-        `${getCurrentTimestamp()} 📊 Progreso detectado: ${popupInfo.progress}%`
+        `${getCurrentTimestamp()} 📊 Progreso detectado en dashboard: ${dashboardInfo.progress}%`
       );
 
       let claimAttempted = false;
       let claimSuccessful = false;
 
-      if (popupInfo.hasCongratulations) {
-        console.log(
-          `${getCurrentTimestamp()} 🎊 Popup ya muestra "Congratulations".`
-        );
-        claimAttempted = true;
-        claimSuccessful = true;
-      } else if (
-        popupInfo.progress === 100 &&
-        popupInfo.hasOpenButton &&
-        !popupInfo.hasError
+      if (
+        dashboardInfo.progress === 100 &&
+        dashboardInfo.hasOpenButton &&
+        !dashboardInfo.hasError
       ) {
         console.log(
-          `${getCurrentTimestamp()} 🎉 Progreso 100% y botón habilitado. Intentando reclamar...`
+          `${getCurrentTimestamp()} 🎉 Progreso 100% y botón disponible. Intentando reclamar...`
         );
 
-        // PRIMER CLICK en "Open Wish Box" (en la página/popup inicial)
-        const claimResult = await page.evaluate(() => {
+        // PRIMER CLICK en "Open Wish Box" (en el dashboard)
+        const firstClick = await page.evaluate(() => {
           const allElements = document.querySelectorAll("*");
           for (let el of allElements) {
             const text = el.textContent ? el.textContent.trim() : "";
@@ -293,17 +266,17 @@ async function runOnce(label = "ejecución") {
 
         claimAttempted = true;
 
-        if (claimResult.clicked) {
+        if (firstClick.clicked) {
           console.log(
-            `${getCurrentTimestamp()} ✅ Click en "Open Wish Box" exitoso (${claimResult.method})`
+            `${getCurrentTimestamp()} ✅ Primer click en "Open Wish Box" exitoso (${firstClick.tag})`
           );
-          await page.waitForTimeout(3000); // Esperar que aparezca el modal
+          await page.waitForTimeout(3000);
 
           // SEGUNDO CLICK en el botón del modal
           console.log(
             `${getCurrentTimestamp()} 🔄 Buscando botón "Open Wish Box" en modal...`
           );
-          
+
           const modalClick = await page.evaluate(() => {
             const allElements = document.querySelectorAll("*");
             for (let el of allElements) {
@@ -321,24 +294,24 @@ async function runOnce(label = "ejecución") {
 
           if (modalClick.clicked) {
             console.log(
-              `${getCurrentTimestamp()} ✅ Click en botón del modal exitoso (${modalClick.tag})`
+              `${getCurrentTimestamp()} ✅ Segundo click en modal exitoso (${modalClick.tag})`
             );
-            await page.waitForTimeout(6000); // Esperar confirmación
+            await page.waitForTimeout(6000);
           } else {
             console.log(
-              `${getCurrentTimestamp()} ⚠️ No se encontró botón en el modal, continuando...`
+              `${getCurrentTimestamp()} ⚠️ No se encontró botón en modal, continuando...`
             );
             await page.waitForTimeout(4000);
           }
 
-          // Verificar resultado tras los clicks
+          // Verificar si aparece mensaje de error
           const afterClickInfo = await page.evaluate(() => {
             const bodyText = document.body.innerText;
             const hasError =
               bodyText.includes("Request Failed") ||
               bodyText.includes("failed");
             const hasCongratulations =
-              bodyText.includes("Congratulations") || bodyText.includes("Success");
+              bodyText.includes("Congratulations");
             return { hasError, hasCongratulations };
           });
 
@@ -346,47 +319,48 @@ async function runOnce(label = "ejecución") {
             console.log(
               `${getCurrentTimestamp()} ⚠️ Error tras intentar reclamar (Request Failed).`
             );
-            claimSuccessful = false;
           } else if (afterClickInfo.hasCongratulations) {
             console.log(
-              `${getCurrentTimestamp()} 🎊 Reclamo exitoso según popup.`
+              `${getCurrentTimestamp()} 🎊 Mensaje "Congratulations" detectado. Verificando balance...`
             );
-            claimSuccessful = true;
           } else {
             console.log(
-              `${getCurrentTimestamp()} ℹ️ Estado ambiguo tras click. Se verificará por balance.`
+              `${getCurrentTimestamp()} ℹ️ Estado tras clicks. Se verificará balance.`
             );
-            claimSuccessful = false;
           }
         } else {
           console.log(
-            `${getCurrentTimestamp()} ⚠️ No se pudo clickear "Open Wish Box" por selector; se omite reclamo en esta ejecución.`
+            `${getCurrentTimestamp()} ⚠️ No se pudo clickear "Open Wish Box"; se omite reclamo.`
           );
-          claimSuccessful = false;
         }
-      } else if (popupInfo.progress < 100) {
+      } else if (dashboardInfo.progress < 100) {
         console.log(
-          `${getCurrentTimestamp()} 📈 Progreso ${popupInfo.progress}%. No alcanza 100%; no se intenta reclamar.`
+          `${getCurrentTimestamp()} 📈 Progreso ${dashboardInfo.progress}%. No alcanza 100%; no se intenta reclamar.`
+        );
+      } else if (!dashboardInfo.hasOpenButton) {
+        console.log(
+          `${getCurrentTimestamp()} ℹ️ No se encontró botón "Open Wish Box" en dashboard.`
         );
       }
 
-      // Cerrar popup (si existe)
+      // Cerrar cualquier popup que pueda estar abierto
       await page.evaluate(() => {
         const closeBtn = Array.from(document.querySelectorAll("*")).find(
           (el) =>
-            el.alt === "closeButton" || el.getAttribute("alt") === "closeButton"
+            el.alt === "closeButton" || 
+            el.getAttribute("alt") === "closeButton" ||
+            (el.textContent && el.textContent.trim() === "OK")
         );
         if (closeBtn) closeBtn.click();
       });
       await page.waitForTimeout(2000);
 
       summary.claimAttempted = claimAttempted;
-      summary.claimSuccessful = claimSuccessful;
 
-      // Verificar balance después solo si se intentó reclamar o el popup decía Congratulations
+      // === VERIFICACIÓN DE BALANCE (ÚNICA FUENTE DE VERDAD) ===
       if (claimAttempted) {
         console.log(
-          `${getCurrentTimestamp()} 🔍 Verificando balance tras intento de reclamo...`
+          `${getCurrentTimestamp()} 🔍 Verificando balance para confirmar reclamo...`
         );
 
         await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
@@ -412,19 +386,24 @@ async function runOnce(label = "ejecución") {
           (balanceAfter || "0").replace(/,/g, "")
         );
 
+        // ÚNICA FORMA DE MARCAR ÉXITO: BALANCE AUMENTÓ
         if (!isNaN(balanceAfterNum) && balanceAfterNum > balanceBeforeNum) {
           const diff = (balanceAfterNum - balanceBeforeNum).toFixed(2);
           console.log(
-            `${getCurrentTimestamp()} 🎉 Balance aumentó +${diff} puntos.`
+            `${getCurrentTimestamp()} 🎉 ¡Balance aumentó +${diff} puntos! Reclamo EXITOSO.`
           );
-          summary.claimSuccessful = true;
+          claimSuccessful = true;
         } else {
           console.log(
-            `${getCurrentTimestamp()} ℹ️ Balance sin cambios tras intento de reclamo.`
+            `${getCurrentTimestamp()} ℹ️ Balance sin cambios. Reclamo NO exitoso.`
           );
+          claimSuccessful = false;
         }
+
+        summary.claimSuccessful = claimSuccessful;
       }
 
+      // Determinar status final
       if (summary.claimAttempted && summary.claimSuccessful) {
         summary.status = "OK_CLAIMED";
       } else if (summary.claimAttempted && !summary.claimSuccessful) {
